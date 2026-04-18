@@ -38,6 +38,7 @@
 class Node;
 class NavigationMesh;
 class NavigationMeshSourceGeometryData3D;
+struct rcConfig;
 
 class NavMeshGenerator3D : public Object {
 	static NavMeshGenerator3D *singleton;
@@ -99,6 +100,12 @@ private:
 	static void generator_parse_source_geometry_data(const Ref<NavigationMesh> &p_navigation_mesh, Ref<NavigationMeshSourceGeometryData3D> p_source_geometry_data, Node *p_root_node);
 	static void generator_bake_from_source_geometry_data(NavMeshGeneratorTask3D *p_generator_task);
 
+    static void _generator_bake_spherical_from_source_geometry_data(
+        Ref<NavigationMesh> p_navigation_mesh, 
+        const Vector<float> &p_vertices, 
+        const Vector<int> &p_indices, 
+        const rcConfig &p_cfg
+    );
 	static bool generator_emit_callback(const Callable &p_callback);
 
 public:

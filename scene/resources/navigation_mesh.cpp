@@ -198,6 +198,16 @@ float NavigationMesh::get_agent_max_slope() const {
 	return agent_max_slope;
 }
 
+void NavigationMesh::set_spherical(bool p_enable)
+{
+	spherical = p_enable;
+}
+
+bool NavigationMesh::get_spherical() const
+{
+	return spherical;
+}
+
 void NavigationMesh::set_region_min_size(float p_value) {
 	ERR_FAIL_COND(p_value < 0);
 	region_min_size = p_value;
@@ -520,6 +530,9 @@ void NavigationMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_agent_max_slope", "agent_max_slope"), &NavigationMesh::set_agent_max_slope);
 	ClassDB::bind_method(D_METHOD("get_agent_max_slope"), &NavigationMesh::get_agent_max_slope);
 
+	ClassDB::bind_method(D_METHOD("set_spherical", "spherical"), &NavigationMesh::set_spherical);
+	ClassDB::bind_method(D_METHOD("get_spherical"), &NavigationMesh::get_spherical);
+
 	ClassDB::bind_method(D_METHOD("set_region_min_size", "region_min_size"), &NavigationMesh::set_region_min_size);
 	ClassDB::bind_method(D_METHOD("get_region_min_size"), &NavigationMesh::get_region_min_size);
 
@@ -590,6 +603,7 @@ void NavigationMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_radius", PROPERTY_HINT_RANGE, "0.0,500.0,0.01,or_greater,suffix:m"), "set_agent_radius", "get_agent_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_max_climb", PROPERTY_HINT_RANGE, "0.0,500.0,0.01,or_greater,suffix:m"), "set_agent_max_climb", "get_agent_max_climb");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_max_slope", PROPERTY_HINT_RANGE, "0.02,90.0,0.01,degrees"), "set_agent_max_slope", "get_agent_max_slope");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "spherical"), "set_spherical", "get_spherical");
 	ADD_GROUP("Regions", "region_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "region_min_size", PROPERTY_HINT_RANGE, "0.0,150.0,0.01,or_greater"), "set_region_min_size", "get_region_min_size");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "region_merge_size", PROPERTY_HINT_RANGE, "0.0,150.0,0.01,or_greater"), "set_region_merge_size", "get_region_merge_size");

@@ -3893,13 +3893,17 @@ bool BindingsGenerator::_populate_object_type_interfaces() {
 		ClassDB::ClassInfo *class_info = ClassDB::classes.getptr(type_cname);
 
 		TypeInterface itype = TypeInterface::create_object_type(type_cname, pascal_to_pascal_case(type_cname), api_type);
-
+		
 		itype.base_name = ClassDB::get_parent_class(type_cname);
 		itype.is_singleton = Engine::get_singleton()->has_singleton(type_cname);
 		itype.is_instantiable = class_info->creation_func && !itype.is_singleton;
 		itype.is_ref_counted = ClassDB::is_parent_class(type_cname, name_cache.type_RefCounted);
 		itype.memory_own = itype.is_ref_counted;
-
+		printf("Type: %s, is_singleton: %s, is_instantiable: %s, is_ref_counted: %s\n",
+				String(itype.name).utf8().get_data(),
+				itype.is_singleton ? "true" : "false",
+				itype.is_instantiable ? "true" : "false",
+				itype.is_ref_counted ? "true" : "false");
 		if (itype.class_doc) {
 			itype.is_deprecated = itype.class_doc->is_deprecated;
 			itype.deprecation_message = itype.class_doc->deprecated_message;

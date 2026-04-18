@@ -301,6 +301,106 @@ void NavMeshGenerator3D::generator_parse_source_geometry_data(const Ref<Navigati
 	}
 }
 
+// Helper function for spherical walkability testing
+bool _is_triangle_walkable_spherical(const Vector3 &v0, const Vector3 &v1, const Vector3 &v2, const Vector3 &sphere_center, float walkable_threshold) {
+    // Calculate triangle normal
+    Vector3 edge1 = v1 - v0;
+    Vector3 edge2 = v2 - v0; 
+    Vector3 normal = edge1.cross(edge2).normalized();
+    
+    // Calculate triangle center and radial "up" direction
+    Vector3 tri_center = (v0 + v1 + v2) / 3.0f;
+    Vector3 radial_up = (tri_center - sphere_center).normalized();
+    
+    // Check if triangle normal aligns with radial up direction
+    float alignment = normal.dot(radial_up);
+    
+    return alignment > walkable_threshold;
+}
+
+// Add this implementation to the cpp file
+void NavMeshGenerator3D::_generator_bake_spherical_from_source_geometry_data(
+    Ref<NavigationMesh> p_navigation_mesh, 
+    const Vector<float> &p_vertices, 
+    const Vector<int> &p_indices, 
+    const rcConfig &p_cfg) 
+{
+ 	
+	String bake_state = "Baking spherical navigation mesh...";
+    
+    const int ntris = p_indices.size() / 3;
+    
+    // First, filter triangles based on spherical walkability
+    Vector<bool> walkable_triangles;
+    walkable_triangles.resize(ntris);
+    
+    const float walkable_threshold = Math::cos(Math::deg_to_rad(p_cfg.walkableSlopeAngle));
+    const Vector3 sphere_center = Vector3(0, 0, 0); // Assume sphere centered at origin for now
+    
+    // FIRST LOOP: Determine which triangles are walkable
+    for (int i = 0; i < ntris; i++) {
+        const int idx0 = p_indices[i * 3 + 0];
+        const int idx1 = p_indices[i * 3 + 1]; 
+        const int idx2 = p_indices[i * 3 + 2];
+        
+        const Vector3 v0(p_vertices[idx0 * 3], p_vertices[idx0 * 3 + 1], p_vertices[idx0 * 3 + 2]);
+        const Vector3 v1(p_vertices[idx1 * 3], p_vertices[idx1 * 3 + 1], p_vertices[idx1 * 3 + 2]);
+        const Vector3 v2(p_vertices[idx2 * 3], p_vertices[idx2 * 3 + 1], p_vertices[idx2 * 3 + 2]);
+        
+        // HERE IS THE CALL TO THE WALKABILITY FUNCTION
+        walkable_triangles.write[i] = _is_triangle_walkable_spherical(v0, v1, v2, sphere_center, walkable_threshold);
+    }
+    
+    // Now build the navigation mesh with only walkable triangles
+    // We need to collect unique vertices and build new index mapping
+    HashMap<Vector3, int> vertex_to_index;
+    Vector<Vector3> nav_vertices;
+    Vector<Vector<int>> nav_polygons;
+    
+    // SECOND LOOP: Build nav mesh from walkable triangles only
+    for (int i = 0; i < ntris; i++) {
+        if (!walkable_triangles[i]) {
+            continue; // Skip non-walkable triangles
+        }
+        
+        const int idx0 = p_indices[i * 3 + 0];
+        const int idx1 = p_indices[i * 3 + 1]; 
+        const int idx2 = p_indices[i * 3 + 2];
+        
+        const Vector3 v0(p_vertices[idx0 * 3], p_vertices[idx0 * 3 + 1], p_vertices[idx0 * 3 + 2]);
+        const Vector3 v1(p_vertices[idx1 * 3], p_vertices[idx1 * 3 + 1], p_vertices[idx1 * 3 + 2]);
+        const Vector3 v2(p_vertices[idx2 * 3], p_vertices[idx2 * 3 + 1], p_vertices[idx2 * 3 + 2]);
+        
+        Vector<int> polygon;
+        polygon.resize(3);
+        
+        // Add vertices to nav_vertices if not already present, get indices
+        for (int j = 0; j < 3; j++) {
+            Vector3 vertex;
+            if (j == 0) vertex = v0;
+            else if (j == 1) vertex = v1; 
+            else vertex = v2;
+            
+            int *existing_idx = vertex_to_index.getptr(vertex);
+            if (existing_idx) {
+                polygon.write[j] = *existing_idx;
+            } else {
+                int new_idx = nav_vertices.size();
+                vertex_to_index[vertex] = new_idx;
+                nav_vertices.push_back(vertex);
+                polygon.write[j] = new_idx;
+            }
+        }
+        
+        nav_polygons.push_back(polygon);
+    }
+    
+    // Set the navigation mesh data
+    p_navigation_mesh->set_data(nav_vertices, nav_polygons);
+    
+    bake_state = "Spherical baking finished.";
+}
+
 void NavMeshGenerator3D::generator_bake_from_source_geometry_data(NavMeshGeneratorTask3D *p_generator_task) {
 	Ref<NavigationMesh> p_navigation_mesh = p_generator_task->navigation_mesh;
 	const Ref<NavigationMeshSourceGeometryData3D> &p_source_geometry_data = p_generator_task->source_geometry_data;
@@ -348,6 +448,7 @@ void NavMeshGenerator3D::generator_bake_from_source_geometry_data(NavMeshGenerat
 		cfg.borderSize = (int)Math::ceil(p_navigation_mesh->get_border_size() / cfg.cs);
 	}
 	cfg.walkableSlopeAngle = p_navigation_mesh->get_agent_max_slope();
+	cfg.spherical = p_navigation_mesh->get_spherical();
 	cfg.walkableHeight = (int)Math::ceil(p_navigation_mesh->get_agent_height() / cfg.ch);
 	cfg.walkableClimb = (int)Math::floor(p_navigation_mesh->get_agent_max_climb() / cfg.ch);
 	cfg.walkableRadius = (int)Math::ceil(p_navigation_mesh->get_agent_radius() / cfg.cs);
@@ -406,6 +507,12 @@ void NavMeshGenerator3D::generator_bake_from_source_geometry_data(NavMeshGenerat
 	}
 
 	p_generator_task->bake_state = NavMeshBakeState::BAKE_STATE_CALC_GRID_SIZE; // step #2
+	// NEW: Check for spherical mode and use custom spherical generator
+	if (cfg.spherical) {
+		_generator_bake_spherical_from_source_geometry_data(p_navigation_mesh, source_geometry_vertices, source_geometry_indices, cfg);
+		return;
+	}
+
 	rcCalcGridSize(cfg.bmin, cfg.bmax, cfg.cs, &cfg.width, &cfg.height);
 
 	// ~30000000 seems to be around sweetspot where Editor baking breaks
@@ -433,7 +540,7 @@ void NavMeshGenerator3D::generator_bake_from_source_geometry_data(NavMeshGenerat
 		ERR_FAIL_COND(tri_areas.is_empty());
 
 		memset(tri_areas.ptrw(), 0, ntris * sizeof(unsigned char));
-		rcMarkWalkableTriangles(&ctx, cfg.walkableSlopeAngle, verts, nverts, tris, ntris, tri_areas.ptrw());
+		rcMarkWalkableTriangles(&ctx, cfg.walkableSlopeAngle, verts, nverts, tris, ntris, tri_areas.ptrw(), cfg.spherical);
 
 		ERR_FAIL_COND(!rcRasterizeTriangles(&ctx, verts, nverts, tris, tri_areas.ptr(), ntris, *hf, cfg.walkableClimb));
 	}

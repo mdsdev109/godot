@@ -333,26 +333,66 @@ static void calcTriNormal(const float* v0, const float* v1, const float* v2, flo
 	rcVnormalize(faceNormal);
 }
 
+static void calcTriCenter(const float* v0, const float* v1, const float* v2, float* center)
+{
+    center[0] = (v0[0] + v1[0] + v2[0]) / 3.0f;
+    center[1] = (v0[1] + v1[1] + v2[1]) / 3.0f;
+    center[2] = (v0[2] + v1[2] + v2[2]) / 3.0f;
+}
+
 void rcMarkWalkableTriangles(rcContext* context, const float walkableSlopeAngle,
                              const float* verts, const int numVerts,
                              const int* tris, const int numTris,
-                             unsigned char* triAreaIDs)
+                             unsigned char* triAreaIDs, bool spherical)
 {
 	rcIgnoreUnused(context);
 	rcIgnoreUnused(numVerts);
-
 	const float walkableThr = cosf(walkableSlopeAngle / 180.0f * RC_PI);
 
 	float norm[3];
-
-	for (int i = 0; i < numTris; ++i)
+	if (!spherical)
 	{
-		const int* tri = &tris[i * 3];
-		calcTriNormal(&verts[tri[0] * 3], &verts[tri[1] * 3], &verts[tri[2] * 3], norm);
-		// Check if the face is walkable.
-		if (norm[1] > walkableThr)
+		for (int i = 0; i < numTris; ++i)
 		{
-			triAreaIDs[i] = RC_WALKABLE_AREA;
+			const int* tri = &tris[i * 3];
+			calcTriNormal(&verts[tri[0] * 3], &verts[tri[1] * 3], &verts[tri[2] * 3], norm);
+			// Check if the face is walkable.
+			if (norm[1] > walkableThr)
+			{
+				triAreaIDs[i] = RC_WALKABLE_AREA;
+			}
+		}
+	}
+	else
+	{
+		float center[3] = {0.0f, 0.0f, 0.0f};
+    	float triCenter[3];
+	    float radialUp[3];
+		// Spherical marking: Mark all triangles walkable.
+		for (int i = 0; i < numTris; ++i)
+		{
+			const int* tri = &tris[i * 3];
+        
+        	// Calculate triangle normal
+        	calcTriNormal(&verts[tri[0] * 3], &verts[tri[1] * 3], &verts[tri[2] * 3], norm);
+			
+        	// Calculate triangle center
+        	calcTriCenter(&verts[tri[0] * 3], &verts[tri[1] * 3], &verts[tri[2] * 3], triCenter);
+			
+        	// Calculate radial "up" direction from world center to triangle center
+        	rcVsub(radialUp, triCenter, center);
+        	rcVnormalize(radialUp);
+			
+        	// Check if the face is walkable by comparing triangle normal to radial up
+        	float alignment = rcVdot(norm, radialUp);
+        	if (alignment > walkableThr)
+        	{
+        	    triAreaIDs[i] = RC_WALKABLE_AREA;
+        	}
+			else
+			{
+			    triAreaIDs[i] = RC_WALKABLE_AREA;
+			}	
 		}
 	}
 }

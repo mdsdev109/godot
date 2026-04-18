@@ -91,6 +91,7 @@ protected:
 	float vertices_per_polygon = 6.0f;
 	float detail_sample_distance = 6.0f;
 	float detail_sample_max_error = 1.0f;
+	bool spherical = false;
 
 	SamplePartitionType partition_type = SAMPLE_PARTITION_WATERSHED;
 	ParsedGeometryType parsed_geometry_type = PARSED_GEOMETRY_BOTH;
@@ -145,6 +146,9 @@ public:
 
 	void set_agent_max_slope(float p_value);
 	float get_agent_max_slope() const;
+
+	void set_spherical(bool p_enable);
+	bool get_spherical() const;
 
 	void set_region_min_size(float p_value);
 	float get_region_min_size() const;
