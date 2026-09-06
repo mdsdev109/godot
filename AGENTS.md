@@ -14,8 +14,11 @@ are the place to start. Come back here only for engine-level changes.
 | **`planet`** | **the work.** Everything below assumes you are on it. |
 
 `modules/voxel` is a **separate repository** (fork of `Zylann/godot_voxel`, also on a `planet`
-branch) and is gitignored here. Voxel changes commit there, not here. `planet_work/` is a
-retired scratch area, also ignored — see its `RETIRED.md`.
+branch) and is gitignored here. Voxel changes commit there, not here.
+
+There used to be a `planet_work/` scratch and staging directory at this root. It is gone:
+work happens in git worktrees of the game project now, and nothing should recreate it. See
+`C:\Users\mschw\Home\Godot\Projects\planet-demo\docs\WORKFLOW.md`.
 
 Do not push. Neither fork is pushed without the user asking.
 
