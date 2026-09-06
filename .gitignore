@@ -396,3 +396,10 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 *.generated.props
+
+# --- planet fork (branch: planet) ---
+# modules/voxel is the mschwarz1/godot_voxel fork and carries its own git history.
+# Commit voxel changes in that repository, not this one.
+modules/voxel/
+# Scratch area for agent runs: logs, screenshots, staged copies. Never source of truth.
+planet_work/
