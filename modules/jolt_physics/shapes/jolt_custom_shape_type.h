@@ -40,5 +40,8 @@ constexpr JPH::EShapeSubType OVERRIDE_USER_DATA = JPH::EShapeSubType::User1;
 constexpr JPH::EShapeSubType DOUBLE_SIDED = JPH::EShapeSubType::User2;
 constexpr JPH::EShapeSubType RAY = JPH::EShapeSubType::UserConvex1;
 constexpr JPH::EShapeSubType MOTION = JPH::EShapeSubType::UserConvex2;
+// Not a UserConvex* type: r = f(dir) is only star-shaped, not convex, so it cannot go through
+// the GJK/support-function path. See the planetary collision design doc, section 2.1.
+constexpr JPH::EShapeSubType PLANET = JPH::EShapeSubType::User3;
 
 } // namespace JoltCustomShapeSubType

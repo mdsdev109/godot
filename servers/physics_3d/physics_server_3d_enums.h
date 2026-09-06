@@ -46,6 +46,7 @@ enum ShapeType {
 	SHAPE_HEIGHTMAP, ///< dict( int:"width", int:"depth",float:"cell_size", float_array:"heights"
 	SHAPE_SOFT_BODY, ///< Used internally, can't be created from the physics server.
 	SHAPE_CUSTOM, ///< Server-Implementation based custom shape, calling shape_create() with this value will result in an error
+	SHAPE_PLANET, ///< dict: analytic planet surface r = f(dir). Jolt only. Appended last on purpose, see physics_server_3d.cpp.
 };
 
 /* SPACE API */

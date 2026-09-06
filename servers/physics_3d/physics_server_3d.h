@@ -73,6 +73,9 @@ public:
 	virtual RID concave_polygon_shape_create() = 0;
 	virtual RID heightmap_shape_create() = 0;
 	virtual RID custom_shape_create() = 0;
+	// Deliberately not pure: only the Jolt backend implements this. Everything else inherits a
+	// default that errors, which is the intended behaviour rather than an oversight.
+	virtual RID planet_shape_create();
 
 	virtual void shape_set_data(RID p_shape, const Variant &p_data) = 0;
 	virtual void shape_set_custom_solver_bias(RID p_shape, real_t p_bias) = 0;

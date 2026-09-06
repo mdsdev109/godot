@@ -45,6 +45,7 @@
 #include "shapes/jolt_convex_polygon_shape_3d.h"
 #include "shapes/jolt_cylinder_shape_3d.h"
 #include "shapes/jolt_height_map_shape_3d.h"
+#include "shapes/jolt_planet_shape_3d.h"
 #include "shapes/jolt_separation_ray_shape_3d.h"
 #include "shapes/jolt_sphere_shape_3d.h"
 #include "shapes/jolt_world_boundary_shape_3d.h"
@@ -122,6 +123,13 @@ RID JoltPhysicsServer3D::concave_polygon_shape_create() {
 
 RID JoltPhysicsServer3D::heightmap_shape_create() {
 	JoltShape3D *shape = memnew(JoltHeightMapShape3D);
+	RID rid = shape_owner.make_rid(shape);
+	shape->set_rid(rid);
+	return rid;
+}
+
+RID JoltPhysicsServer3D::planet_shape_create() {
+	JoltShape3D *shape = memnew(JoltPlanetShape3D);
 	RID rid = shape_owner.make_rid(shape);
 	shape->set_rid(rid);
 	return rid;

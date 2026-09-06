@@ -32,6 +32,7 @@
 
 #include "objects/jolt_group_filter.h"
 #include "shapes/jolt_custom_double_sided_shape.h"
+#include "shapes/jolt_custom_planet_shape.h"
 #include "shapes/jolt_custom_ray_shape.h"
 #include "shapes/jolt_custom_user_data_shape.h"
 
@@ -108,6 +109,7 @@ void jolt_initialize() {
 
 	JPH::RegisterTypes();
 
+	JoltCustomPlanetShape::register_type();
 	JoltCustomRayShape::register_type();
 	JoltCustomUserDataShape::register_type();
 	JoltCustomDoubleSidedShape::register_type();

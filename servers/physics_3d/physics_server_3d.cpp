@@ -51,6 +51,10 @@ bool PhysicsServer3D::_body_test_motion(RID p_body, RequiredParam<PhysicsTestMot
 	return body_test_motion(p_body, p_parameters->get_parameters(), result_ptr);
 }
 
+RID PhysicsServer3D::planet_shape_create() {
+	ERR_FAIL_V_MSG(RID(), "PlanetShape3D requires the Jolt Physics backend. Set the project setting \"physics/3d/physics_engine\" to \"Jolt Physics\".");
+}
+
 RID PhysicsServer3D::shape_create(PS3DE::ShapeType p_shape) {
 	switch (p_shape) {
 		case PS3DE::SHAPE_WORLD_BOUNDARY:
@@ -73,6 +77,8 @@ RID PhysicsServer3D::shape_create(PS3DE::ShapeType p_shape) {
 			return heightmap_shape_create();
 		case PS3DE::SHAPE_CUSTOM:
 			return custom_shape_create();
+		case PS3DE::SHAPE_PLANET:
+			return planet_shape_create();
 		default:
 			return RID();
 	}
@@ -91,6 +97,7 @@ void PhysicsServer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("concave_polygon_shape_create"), &PhysicsServer3D::concave_polygon_shape_create);
 	ClassDB::bind_method(D_METHOD("heightmap_shape_create"), &PhysicsServer3D::heightmap_shape_create);
 	ClassDB::bind_method(D_METHOD("custom_shape_create"), &PhysicsServer3D::custom_shape_create);
+	ClassDB::bind_method(D_METHOD("planet_shape_create"), &PhysicsServer3D::planet_shape_create);
 
 	ClassDB::bind_method(D_METHOD("shape_set_data", "shape", "data"), &PhysicsServer3D::shape_set_data);
 	ClassDB::bind_method(D_METHOD("shape_set_margin", "shape", "margin"), &PhysicsServer3D::shape_set_margin);
@@ -452,6 +459,7 @@ void PhysicsServer3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(PS3DE::SHAPE_HEIGHTMAP);
 	BIND_ENUM_CONSTANT(PS3DE::SHAPE_SOFT_BODY);
 	BIND_ENUM_CONSTANT(PS3DE::SHAPE_CUSTOM);
+	BIND_ENUM_CONSTANT(PS3DE::SHAPE_PLANET);
 
 	BIND_ENUM_CONSTANT(PS3DE::AREA_PARAM_GRAVITY_OVERRIDE_MODE);
 	BIND_ENUM_CONSTANT(PS3DE::AREA_PARAM_GRAVITY);
