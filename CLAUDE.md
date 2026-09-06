@@ -1,13 +1,15 @@
 # Godot fork (branch `planet`)
 
-Instructions are in **[AGENTS.md](AGENTS.md)** beside this file, so Claude Code and Codex read
-the same thing. Read it before changing anything here.
+@AGENTS.md
 
-Fast orientation:
+The file above is imported automatically. It covers the branch layout, what this fork adds,
+how to build, and the traps that cost the most time here.
 
-- **The game project is elsewhere:** `C:\Users\mschw\Home\Godot\Projects\planet-demo`. If the
-  task is about the game rather than the engine, start from its `AGENTS.md`.
-- Work on branch `planet`. `master` is upstream Godot.
-- `modules/voxel` is a **separate repo** — commit voxel changes there.
-- After any engine API change run `buildScript.bat glue`, or the editor segfaults on startup.
-- Never benchmark a `buildScript.bat dev` binary; it is `-O0`.
+**The game project is elsewhere:** `C:\Users\mschw\Home\Godot\Projects\planet-demo`. If the task
+is about the game rather than the engine, start from its `CLAUDE.md` — it auto-loads the
+orientation and workflow docs that explain the whole project.
+
+Before changing the planet field, read
+`C:\Users\mschw\Home\Godot\Projects\planet-demo\docs\INVARIANTS.md`. The scalar, batched and
+GLSL evaluations must stay bit-identical, and a new `PlanetFieldData` member does not reach the
+collider unless you pack it, unpack it, and add it to `planet_field_equal()`.
