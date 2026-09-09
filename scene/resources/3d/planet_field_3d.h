@@ -83,6 +83,8 @@ public:
 	real_t get_mountain_amplitude() const;
 	void set_mountain_ridge(real_t p_v);
 	real_t get_mountain_ridge() const;
+	void set_terrace_step(real_t p_v);
+	real_t get_terrace_step() const;
 	void set_biome_kernel_radius(real_t p_v);
 	real_t get_biome_kernel_radius() const;
 
@@ -94,7 +96,7 @@ public:
 	Vector3 get_blended_params(const Vector3 &p_unit_dir) const;
 	// The biome blend at a point in CLIMATE space rather than on the sphere, so it can be baked
 	// into a lookup table for the GPU. Returns [base_elevation, amplitude_scale, frequency_scale,
-	// roughness, standard, billow, ridged].
+	// roughness, standard, billow, ridged, terrace_strength].
 	PackedFloat32Array resolve_biome_at(real_t p_temperature, real_t p_moisture) const;
 
 	void set_shape_standard(real_t p_value);

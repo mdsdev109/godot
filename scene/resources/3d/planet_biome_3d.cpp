@@ -48,6 +48,7 @@ PB_SETGET(base_elevation, base_elevation, -4.0, 4.0)
 PB_SETGET(amplitude_scale, amplitude_scale, 0.0, 16.0)
 PB_SETGET(frequency_scale, frequency_scale, 0.001, 64.0)
 PB_SETGET(roughness, roughness, 0.0, 1.0)
+PB_SETGET(terrace_strength, terrace_strength, 0.0, 1.0)
 PB_SETGET(shape_standard, shape.standard, 0.0, 1.0)
 PB_SETGET(shape_billow, shape.billow, 0.0, 1.0)
 PB_SETGET(shape_ridged, shape.ridged, 0.0, 1.0)
@@ -79,6 +80,7 @@ void PlanetBiomeProfile3D::_bind_methods() {
 	PB_BIND(amplitude_scale)
 	PB_BIND(frequency_scale)
 	PB_BIND(roughness)
+	PB_BIND(terrace_strength)
 	PB_BIND(shape_standard)
 	PB_BIND(shape_billow)
 	PB_BIND(shape_ridged)
@@ -95,6 +97,7 @@ void PlanetBiomeProfile3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "amplitude_scale", PROPERTY_HINT_RANGE, "0,16,0.001"), "set_amplitude_scale", "get_amplitude_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "frequency_scale", PROPERTY_HINT_RANGE, "0.001,64,0.001"), "set_frequency_scale", "get_frequency_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "roughness", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_roughness", "get_roughness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_strength", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_terrace_strength", "get_terrace_strength");
 
 	ADD_GROUP("Shape Mix", "shape_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "shape_standard", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_shape_standard", "get_shape_standard");

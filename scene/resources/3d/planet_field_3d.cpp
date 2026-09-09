@@ -265,6 +265,13 @@ void PlanetField3D::set_mountain_ridge(real_t p_v) {
 }
 real_t PlanetField3D::get_mountain_ridge() const { return data.mountain_ridge; }
 
+void PlanetField3D::set_terrace_step(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0, "PlanetField3D terrace_step cannot be negative.");
+	data.terrace_step = p_v;
+	emit_changed();
+}
+real_t PlanetField3D::get_terrace_step() const { return data.terrace_step; }
+
 void PlanetField3D::set_biome_kernel_radius(real_t p_v) {
 	ERR_FAIL_COND_MSG(p_v <= 0, "PlanetField3D biome_kernel_radius must be greater than zero.");
 	data.biomes.kernel_radius = float(p_v);
@@ -285,6 +292,7 @@ void PlanetField3D::use_default_biomes() {
 		profile->set_amplitude_scale(e.amplitude_scale);
 		profile->set_frequency_scale(e.frequency_scale);
 		profile->set_roughness(e.roughness);
+		profile->set_terrace_strength(e.terrace_strength);
 		profile->set_shape_standard(e.shape.standard);
 		profile->set_shape_billow(e.shape.billow);
 		profile->set_shape_ridged(e.shape.ridged);
@@ -311,7 +319,8 @@ Vector3 PlanetField3D::get_blended_params(const Vector3 &p_unit_dir) const {
 		return Vector3();
 	}
 	d.normalize();
-	data.resolve_params(d, f, sh, amp, off);
+	float terrace_strength = 0.f;
+	data.resolve_params(d, f, sh, amp, off, terrace_strength);
 	const double amp_scale = data.amplitude > 0.0 ? amp / data.amplitude : 0.0;
 	const double freq_scale = f.period > 0.f ? double(data.fbm.period) / double(f.period) : 0.0;
 	return Vector3(amp_scale, freq_scale, sh.ridged);
@@ -320,7 +329,7 @@ Vector3 PlanetField3D::get_blended_params(const Vector3 &p_unit_dir) const {
 PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t p_moisture) const {
 	PlanetBlendedParams b;
 	PackedFloat32Array out;
-	out.resize(7);
+	out.resize(8);
 	if (!data.use_biomes()) {
 		// No table: the master parameters, unscaled, so the caller needs no special case.
 		out.set(0, 0.f);
@@ -330,6 +339,7 @@ PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t 
 		out.set(4, data.shape.standard);
 		out.set(5, data.shape.billow);
 		out.set(6, data.shape.ridged);
+		out.set(7, 0.f);
 		return out;
 	}
 	data.biomes.blend(float(p_temperature), float(p_moisture), b);
@@ -340,6 +350,7 @@ PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t 
 	out.set(4, b.shape.standard);
 	out.set(5, b.shape.billow);
 	out.set(6, b.shape.ridged);
+	out.set(7, b.terrace_strength);
 	return out;
 }
 
@@ -460,6 +471,8 @@ void PlanetField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mountain_amplitude"), &PlanetField3D::get_mountain_amplitude);
 	ClassDB::bind_method(D_METHOD("set_mountain_ridge", "value"), &PlanetField3D::set_mountain_ridge);
 	ClassDB::bind_method(D_METHOD("get_mountain_ridge"), &PlanetField3D::get_mountain_ridge);
+	ClassDB::bind_method(D_METHOD("set_terrace_step", "value"), &PlanetField3D::set_terrace_step);
+	ClassDB::bind_method(D_METHOD("get_terrace_step"), &PlanetField3D::get_terrace_step);
 	ClassDB::bind_method(D_METHOD("set_biome_kernel_radius", "value"), &PlanetField3D::set_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("get_biome_kernel_radius"), &PlanetField3D::get_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("use_default_biomes"), &PlanetField3D::use_default_biomes);
@@ -507,6 +520,7 @@ void PlanetField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "macro_height_scale", PROPERTY_HINT_RANGE, "0,100000,0.001,or_greater,suffix:m"), "set_macro_height_scale", "get_macro_height_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_amplitude", PROPERTY_HINT_RANGE, "0,8,0.001"), "set_mountain_amplitude", "get_mountain_amplitude");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_ridge", PROPERTY_HINT_RANGE, "0,4,0.001"), "set_mountain_ridge", "get_mountain_ridge");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_step", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_terrace_step", "get_terrace_step");
 
 
 	ADD_GROUP("Coasts", "coast_");

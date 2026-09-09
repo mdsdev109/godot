@@ -479,6 +479,7 @@ struct PlanetBiomeProfileData {
 	float amplitude_scale = 1.f; // Multiplies the planet's amplitude.
 	float frequency_scale = 1.f; // Multiplies the base frequency (divides the period).
 	float roughness = 0.5f; // fBm gain.
+	float terrace_strength = 0.f; // 0 is untouched terrain, 1 is fully shaped into global terraces.
 	PlanetHashNoise::ShapeMix shape;
 
 	// Which surface material this biome wears, on flat ground and on cliffs.
@@ -497,6 +498,7 @@ struct PlanetBlendedParams {
 	float amplitude_scale = 1.f;
 	float frequency_scale = 1.f;
 	float roughness = 0.5f;
+	float terrace_strength = 0.f;
 	PlanetHashNoise::ShapeMix shape;
 };
 
@@ -562,6 +564,7 @@ struct PlanetBiomeTable {
 		float amplitude_scale = 0.f;
 		float frequency_scale = 0.f;
 		float roughness = 0.f;
+		float terrace_strength = 0.f;
 		float w_std = 0.f;
 		float w_bil = 0.f;
 		float w_rid = 0.f;
@@ -574,6 +577,7 @@ struct PlanetBiomeTable {
 			// creates centimetre-scale height jumps even when every biome uses global frequency.
 			frequency_scale += entries[i].frequency_scale * weights[i];
 			roughness += entries[i].roughness * w;
+			terrace_strength += entries[i].terrace_strength * w;
 			w_std += entries[i].shape.standard * w;
 			w_bil += entries[i].shape.billow * w;
 			w_rid += entries[i].shape.ridged * w;
@@ -582,9 +586,18 @@ struct PlanetBiomeTable {
 		r_out.amplitude_scale = amplitude_scale;
 		r_out.frequency_scale = frequency_scale / total;
 		r_out.roughness = roughness;
+		r_out.terrace_strength = terrace_strength;
 		r_out.shape.standard = w_std;
 		r_out.shape.billow = w_bil;
 		r_out.shape.ridged = w_rid;
+	}
+
+	float max_terrace_strength() const {
+		float result = 0.f;
+		for (int i = 0; i < count; ++i) {
+			result = result > entries[i].terrace_strength ? result : entries[i].terrace_strength;
+		}
+		return result;
 	}
 
 	// Worst-case parameter values over the whole table. The global radius bounds and the Lipschitz

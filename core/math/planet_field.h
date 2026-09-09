@@ -308,16 +308,24 @@ struct PlanetFieldData {
 	double mountain_amplitude = 0.0;
 	double mountain_ridge = 0.0;
 
+	// Globally aligned vertical spacing between terrain shelves, in metres. Individual biomes blend
+	// their terrace strength, but not the spacing: changing the spacing across climate boundaries
+	// would drag every height band sideways in the same way spatially varying noise frequency does.
+	// Zero disables the shaping entirely.
+	double terrace_step = 0.0;
+
 	bool use_biomes() const { return macro_map != nullptr && macro_map->is_valid() && !biomes.is_empty(); }
 
 	// Resolves the per-point noise parameters from the macro map and biome table. One place, so the
 	// scalar and batched evaluators cannot drift apart.
 	void resolve_params(const Vector3 &p_unit_dir, PlanetHashNoise::FbmParams &r_fbm,
-			PlanetHashNoise::ShapeMix &r_shape, double &r_amplitude, double &r_base_offset) const {
+			PlanetHashNoise::ShapeMix &r_shape, double &r_amplitude, double &r_base_offset,
+			float &r_terrace_strength) const {
 		r_fbm = fbm;
 		r_shape = shape;
 		r_amplitude = amplitude;
 		r_base_offset = 0.0;
+		r_terrace_strength = 0.f;
 		if (!use_biomes()) {
 			return;
 		}
@@ -346,6 +354,24 @@ struct PlanetFieldData {
 			r_fbm.period = fbm.period / b.frequency_scale;
 		}
 		r_fbm.gain = b.roughness;
+		r_terrace_strength = b.terrace_strength;
+	}
+
+	// Smoothly shelves an already-computed height without sampling another field. Half of each step
+	// is a flat bench and half is a cubic transition, keeping the surface continuous and its maximum
+	// slope amplification bounded at 3x. Levels are planet-global so neighbouring biomes agree on
+	// where every shelf is even when their strengths differ.
+	double apply_terracing(const double p_offset, const float p_strength) const {
+		if (terrace_step <= 0.0 || p_strength <= 0.f) {
+			return p_offset;
+		}
+		const double scaled = p_offset / terrace_step;
+		const double level = Math::floor(scaled);
+		const double phase = scaled - level;
+		const double t = CLAMP((phase - 0.25) * 2.0, 0.0, 1.0);
+		const double eased = t * t * (3.0 - 2.0 * t);
+		const double shelved = (level + eased) * terrace_step;
+		return Math::lerp(p_offset, shelved, double(CLAMP(p_strength, 0.f, 1.f)));
 	}
 
 	// Applies the bedrock clamp. Every path that produces a radius goes through here, so the floor
@@ -386,6 +412,10 @@ struct PlanetFieldData {
 		r_max_amp = amplitude * double(max_amp_scale) * (1.0 + mountain_amplitude);
 		r_min_offset = amplitude * double(min_base) - macro_height_scale * 0.5;
 		r_max_offset = amplitude * double(max_base) + macro_height_scale * 0.5;
+		// The smooth shelf differs from its input by at most one quarter of a step.
+		const double terrace_pad = terrace_step > 0.0 ? terrace_step * 0.25 * double(biomes.max_terrace_strength()) : 0.0;
+		r_min_offset -= terrace_pad;
+		r_max_offset += terrace_pad;
 	}
 
 	double get_min_radius() const {
@@ -423,12 +453,14 @@ struct PlanetFieldData {
 		PlanetHashNoise::ShapeMix local_shape;
 		double local_amplitude = 0.0;
 		double base_offset = 0.0;
-		resolve_params(p_unit_dir, local_fbm, local_shape, local_amplitude, base_offset);
+		float terrace_strength = 0.f;
+		resolve_params(p_unit_dir, local_fbm, local_shape, local_amplitude, base_offset, terrace_strength);
 
 		const double n = double(PlanetHashNoise::fbm_3d_shaped_precise(
 				p_unit_dir.x * base_radius, p_unit_dir.y * base_radius, p_unit_dir.z * base_radius,
 				local_fbm, local_shape, warp, float(slope_erosion), float(local_amplitude)));
-		return apply_floor(base_radius + coast_offset(p_unit_dir, base_offset + local_amplitude * n));
+		const double offset = apply_terracing(base_offset + local_amplitude * n, terrace_strength);
+		return apply_floor(base_radius + coast_offset(p_unit_dir, offset));
 	}
 
 	// Batched radius evaluation over unit directions supplied as three separate arrays, the layout
@@ -465,12 +497,14 @@ struct PlanetFieldData {
 			PlanetHashNoise::ShapeMix local_shape;
 			double local_amplitude = 0.0;
 			double base_offset = 0.0;
-			resolve_params(p_dirs[i], local_fbm, local_shape, local_amplitude, base_offset);
+			float terrace_strength = 0.f;
+			resolve_params(p_dirs[i], local_fbm, local_shape, local_amplitude, base_offset, terrace_strength);
 
 			p_noise[i] = PlanetHashNoise::fbm_3d_shaped_precise(
 					p_scratch_x[i], p_scratch_y[i], p_scratch_z[i],
 					local_fbm, local_shape, warp, float(slope_erosion), float(local_amplitude));
-			r_radius[i] = apply_floor(base_radius + coast_offset(p_dirs[i], base_offset + local_amplitude * double(p_noise[i])));
+			const double offset = apply_terracing(base_offset + local_amplitude * double(p_noise[i]), terrace_strength);
+			r_radius[i] = apply_floor(base_radius + coast_offset(p_dirs[i], offset));
 		}
 	}
 
@@ -541,6 +575,11 @@ struct PlanetFieldData {
 		// cone margin is zero, and that means missed collisions rather than a cosmetic error.
 		if (macro_map != nullptr && macro_height_scale != 0.0) {
 			result += Math::abs(macro_height_scale) * macro_map->max_height_gradient_per_metre(base_radius);
+		}
+		// The cubic transition has derivative at most 3. Blending it with the original field gives
+		// derivative 1 + 2*strength; use the strongest biome for the global safety bound.
+		if (terrace_step > 0.0 && use_biomes()) {
+			result *= 1.0 + 2.0 * double(biomes.max_terrace_strength());
 		}
 		if (use_coast()) {
 			const double outline_slope = double(coast.noise_amplitude) * 2.24 * PERLIN_3D_LIPSCHITZ_PER_LATTICE_UNIT / double(coast.noise_period);
@@ -626,7 +665,7 @@ inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &
 			a.floor_radius != b.floor_radius || a.sea_level_radius != b.sea_level_radius ||
 			a.dig_margin != b.dig_margin ||
 			a.macro_height_scale != b.macro_height_scale || a.mountain_amplitude != b.mountain_amplitude ||
-			a.mountain_ridge != b.mountain_ridge) {
+			a.mountain_ridge != b.mountain_ridge || a.terrace_step != b.terrace_step) {
 		return false;
 	}
 	if (a.fbm.seed != b.fbm.seed || a.fbm.period != b.fbm.period || a.fbm.octaves != b.fbm.octaves ||
@@ -650,7 +689,7 @@ inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &
 				x.base_elevation != y.base_elevation || x.amplitude_scale != y.amplitude_scale ||
 				x.frequency_scale != y.frequency_scale || x.roughness != y.roughness ||
 				x.shape.standard != y.shape.standard || x.shape.billow != y.shape.billow ||
-				x.shape.ridged != y.shape.ridged) {
+				x.shape.ridged != y.shape.ridged || x.terrace_strength != y.terrace_strength) {
 			return false;
 		}
 	}

@@ -132,14 +132,15 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 	new_field.macro_height_scale = data.get("macro_height_scale", 0.0);
 	new_field.mountain_amplitude = data.get("mountain_amplitude", 0.0);
 	new_field.mountain_ridge = data.get("mountain_ridge", 0.0);
+	new_field.terrace_step = data.get("terrace_step", 0.0);
 	new_field.biomes.kernel_radius = float(double(data.get("biome_kernel_radius", 0.55)));
 	new_field.macro_map = PlanetMacroMapRegistry::get(uint64_t(int64_t(data.get("macro_map_id", 0))));
 
 	const PackedFloat64Array biome_data = data.get("biomes", PackedFloat64Array());
-	new_field.biomes.count = MIN(int(biome_data.size() / 9), PlanetBiomeTable::MAX_BIOMES);
+	new_field.biomes.count = MIN(int(biome_data.size() / 10), PlanetBiomeTable::MAX_BIOMES);
 	for (int i = 0; i < new_field.biomes.count; ++i) {
 		PlanetBiomeProfileData &e = new_field.biomes.entries[i];
-		const double *r = biome_data.ptr() + i * 9;
+		const double *r = biome_data.ptr() + i * 10;
 		e.anchor_temperature = float(r[0]);
 		e.anchor_moisture = float(r[1]);
 		e.base_elevation = float(r[2]);
@@ -149,6 +150,7 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 		e.shape.standard = float(r[6]);
 		e.shape.billow = float(r[7]);
 		e.shape.ridged = float(r[8]);
+		e.terrace_strength = float(r[9]);
 	}
 
 	const int new_face = int(data.get("face", 0));

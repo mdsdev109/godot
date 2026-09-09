@@ -135,6 +135,7 @@ void PlanetShape3D::_update_shape() {
 	data["macro_height_scale"] = fd.macro_height_scale;
 	data["mountain_amplitude"] = fd.mountain_amplitude;
 	data["mountain_ridge"] = fd.mountain_ridge;
+	data["terrace_step"] = fd.terrace_step;
 	data["biome_kernel_radius"] = fd.biomes.kernel_radius;
 
 	// The map itself travels by registry id; a Variant cannot carry the map, and copying it per patch
@@ -142,13 +143,13 @@ void PlanetShape3D::_update_shape() {
 	Ref<PlanetMacroMap3D> map = field->get_macro_map();
 	data["macro_map_id"] = map.is_valid() ? map->get_registry_id() : int64_t(0);
 
-	// Nine floats per biome, flat, because a Variant array of dictionaries would allocate on every
+	// Ten floats per biome, flat, because a Variant array of dictionaries would allocate on every
 	// shape update and there are dozens of patches.
 	PackedFloat64Array biome_data;
-	biome_data.resize(fd.biomes.count * 9);
+	biome_data.resize(fd.biomes.count * 10);
 	for (int i = 0; i < fd.biomes.count; ++i) {
 		const PlanetBiomeProfileData &e = fd.biomes.entries[i];
-		double *w = biome_data.ptrw() + i * 9;
+		double *w = biome_data.ptrw() + i * 10;
 		w[0] = e.anchor_temperature;
 		w[1] = e.anchor_moisture;
 		w[2] = e.base_elevation;
@@ -158,6 +159,7 @@ void PlanetShape3D::_update_shape() {
 		w[6] = e.shape.standard;
 		w[7] = e.shape.billow;
 		w[8] = e.shape.ridged;
+		w[9] = e.terrace_strength;
 	}
 	data["biomes"] = biome_data;
 
