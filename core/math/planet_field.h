@@ -357,10 +357,10 @@ struct PlanetFieldData {
 		r_terrace_strength = b.terrace_strength;
 	}
 
-	// Smoothly shelves an already-computed height without sampling another field. Half of each step
-	// is a flat bench and half is a cubic transition, keeping the surface continuous and its maximum
-	// slope amplification bounded at 3x. Levels are planet-global so neighbouring biomes agree on
-	// where every shelf is even when their strengths differ.
+	// Smoothly shelves an already-computed height without sampling another field. Eighty percent
+	// of each step is split between the lower and upper benches; the middle twenty percent is a
+	// cubic transition. This keeps the surface continuous while producing narrow rock risers between
+	// broad walkable shelves. Levels are planet-global so neighbouring biomes agree on every shelf.
 	double apply_terracing(const double p_offset, const float p_strength) const {
 		if (terrace_step <= 0.0 || p_strength <= 0.f) {
 			return p_offset;
@@ -368,7 +368,7 @@ struct PlanetFieldData {
 		const double scaled = p_offset / terrace_step;
 		const double level = Math::floor(scaled);
 		const double phase = scaled - level;
-		const double t = CLAMP((phase - 0.25) * 2.0, 0.0, 1.0);
+		const double t = CLAMP((phase - 0.4) * 5.0, 0.0, 1.0);
 		const double eased = t * t * (3.0 - 2.0 * t);
 		const double shelved = (level + eased) * terrace_step;
 		return Math::lerp(p_offset, shelved, double(CLAMP(p_strength, 0.f, 1.f)));
@@ -576,10 +576,10 @@ struct PlanetFieldData {
 		if (macro_map != nullptr && macro_height_scale != 0.0) {
 			result += Math::abs(macro_height_scale) * macro_map->max_height_gradient_per_metre(base_radius);
 		}
-		// The cubic transition has derivative at most 3. Blending it with the original field gives
-		// derivative 1 + 2*strength; use the strongest biome for the global safety bound.
+		// Across a 0.2-step transition the cubic has derivative at most 7.5. Blending it with the
+		// original field gives derivative 1 + 6.5*strength; use the strongest biome for the safety bound.
 		if (terrace_step > 0.0 && use_biomes()) {
-			result *= 1.0 + 2.0 * double(biomes.max_terrace_strength());
+			result *= 1.0 + 6.5 * double(biomes.max_terrace_strength());
 		}
 		if (use_coast()) {
 			const double outline_slope = double(coast.noise_amplitude) * 2.24 * PERLIN_3D_LIPSCHITZ_PER_LATTICE_UNIT / double(coast.noise_period);
