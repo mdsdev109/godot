@@ -136,6 +136,7 @@ void PlanetShape3D::_update_shape() {
 	data["mountain_amplitude"] = fd.mountain_amplitude;
 	data["mountain_ridge"] = fd.mountain_ridge;
 	data["terrace_step"] = fd.terrace_step;
+	data["terrace_riser"] = fd.terrace_riser;
 	data["biome_kernel_radius"] = fd.biomes.kernel_radius;
 
 	// The map itself travels by registry id; a Variant cannot carry the map, and copying it per patch

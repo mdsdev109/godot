@@ -85,6 +85,11 @@ public:
 	real_t get_mountain_ridge() const;
 	void set_terrace_step(real_t p_v);
 	real_t get_terrace_step() const;
+	void set_terrace_riser(real_t p_v);
+	real_t get_terrace_riser() const;
+	// Height above the base radius before terracing, coast shaping and the floor, and the terrace
+	// strength there: (offset, strength). Where the risers are follows from these alone.
+	Vector2 eval_unshelved_offset(const Vector3 &p_unit_dir) const;
 	void set_biome_kernel_radius(real_t p_v);
 	real_t get_biome_kernel_radius() const;
 

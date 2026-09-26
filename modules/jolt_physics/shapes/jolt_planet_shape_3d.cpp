@@ -133,6 +133,7 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 	new_field.mountain_amplitude = data.get("mountain_amplitude", 0.0);
 	new_field.mountain_ridge = data.get("mountain_ridge", 0.0);
 	new_field.terrace_step = data.get("terrace_step", 0.0);
+	new_field.terrace_riser = data.get("terrace_riser", 0.2);
 	new_field.biomes.kernel_radius = float(double(data.get("biome_kernel_radius", 0.55)));
 	new_field.macro_map = PlanetMacroMapRegistry::get(uint64_t(int64_t(data.get("macro_map_id", 0))));
 

@@ -272,6 +272,24 @@ void PlanetField3D::set_terrace_step(real_t p_v) {
 }
 real_t PlanetField3D::get_terrace_step() const { return data.terrace_step; }
 
+void PlanetField3D::set_terrace_riser(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.02 || p_v > 1.0, "PlanetField3D terrace_riser must be between 0.02 and 1.");
+	data.terrace_riser = p_v;
+	emit_changed();
+}
+real_t PlanetField3D::get_terrace_riser() const { return data.terrace_riser; }
+
+Vector2 PlanetField3D::eval_unshelved_offset(const Vector3 &p_unit_dir) const {
+	Vector3 d = p_unit_dir;
+	if (d.is_zero_approx()) {
+		return Vector2();
+	}
+	d.normalize();
+	float strength = 0.f;
+	const double offset = data.eval_unshelved_offset(d, strength);
+	return Vector2(offset, strength);
+}
+
 void PlanetField3D::set_biome_kernel_radius(real_t p_v) {
 	ERR_FAIL_COND_MSG(p_v <= 0, "PlanetField3D biome_kernel_radius must be greater than zero.");
 	data.biomes.kernel_radius = float(p_v);
@@ -473,6 +491,9 @@ void PlanetField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mountain_ridge"), &PlanetField3D::get_mountain_ridge);
 	ClassDB::bind_method(D_METHOD("set_terrace_step", "value"), &PlanetField3D::set_terrace_step);
 	ClassDB::bind_method(D_METHOD("get_terrace_step"), &PlanetField3D::get_terrace_step);
+	ClassDB::bind_method(D_METHOD("set_terrace_riser", "value"), &PlanetField3D::set_terrace_riser);
+	ClassDB::bind_method(D_METHOD("get_terrace_riser"), &PlanetField3D::get_terrace_riser);
+	ClassDB::bind_method(D_METHOD("eval_unshelved_offset", "unit_dir"), &PlanetField3D::eval_unshelved_offset);
 	ClassDB::bind_method(D_METHOD("set_biome_kernel_radius", "value"), &PlanetField3D::set_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("get_biome_kernel_radius"), &PlanetField3D::get_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("use_default_biomes"), &PlanetField3D::use_default_biomes);
@@ -521,6 +542,7 @@ void PlanetField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_amplitude", PROPERTY_HINT_RANGE, "0,8,0.001"), "set_mountain_amplitude", "get_mountain_amplitude");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_ridge", PROPERTY_HINT_RANGE, "0,4,0.001"), "set_mountain_ridge", "get_mountain_ridge");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_step", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_terrace_step", "get_terrace_step");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_riser", PROPERTY_HINT_RANGE, "0.02,1,0.001"), "set_terrace_riser", "get_terrace_riser");
 
 
 	ADD_GROUP("Coasts", "coast_");
