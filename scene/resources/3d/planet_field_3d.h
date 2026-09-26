@@ -90,6 +90,18 @@ public:
 	// Height above the base radius before terracing, coast shaping and the floor, and the terrace
 	// strength there: (offset, strength). Where the risers are follows from these alone.
 	Vector2 eval_unshelved_offset(const Vector3 &p_unit_dir) const;
+	void set_plateau_height(real_t p_v);
+	real_t get_plateau_height() const;
+	void set_plateau_period(real_t p_v);
+	real_t get_plateau_period() const;
+	void set_plateau_levels(int p_v);
+	int get_plateau_levels() const;
+	void set_plateau_edge(real_t p_v);
+	real_t get_plateau_edge() const;
+	void set_plateau_spread(real_t p_v);
+	real_t get_plateau_spread() const;
+	void set_plateau_seed(int p_v);
+	int get_plateau_seed() const;
 	void set_biome_kernel_radius(real_t p_v);
 	real_t get_biome_kernel_radius() const;
 

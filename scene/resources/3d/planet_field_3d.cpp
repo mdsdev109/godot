@@ -279,6 +279,32 @@ void PlanetField3D::set_terrace_riser(real_t p_v) {
 }
 real_t PlanetField3D::get_terrace_riser() const { return data.terrace_riser; }
 
+#define PLANET_PLATEAU_SETGET(m_name, m_min)                                              \
+	void PlanetField3D::set_##m_name(real_t p_v) {                                         \
+		ERR_FAIL_COND_MSG(p_v < m_min, "PlanetField3D " #m_name " is below its minimum."); \
+		data.m_name = p_v;                                                                 \
+		emit_changed();                                                                    \
+	}                                                                                      \
+	real_t PlanetField3D::get_##m_name() const { return data.m_name; }
+
+PLANET_PLATEAU_SETGET(plateau_height, 0.0)
+PLANET_PLATEAU_SETGET(plateau_period, 1.0)
+PLANET_PLATEAU_SETGET(plateau_edge, 0.01)
+PLANET_PLATEAU_SETGET(plateau_spread, 0.0)
+
+void PlanetField3D::set_plateau_levels(int p_v) {
+	ERR_FAIL_COND_MSG(p_v < 1, "PlanetField3D plateau_levels must be at least 1.");
+	data.plateau_levels = p_v;
+	emit_changed();
+}
+int PlanetField3D::get_plateau_levels() const { return data.plateau_levels; }
+
+void PlanetField3D::set_plateau_seed(int p_v) {
+	data.plateau_seed = uint32_t(p_v);
+	emit_changed();
+}
+int PlanetField3D::get_plateau_seed() const { return int(data.plateau_seed); }
+
 Vector2 PlanetField3D::eval_unshelved_offset(const Vector3 &p_unit_dir) const {
 	Vector3 d = p_unit_dir;
 	if (d.is_zero_approx()) {
@@ -311,6 +337,7 @@ void PlanetField3D::use_default_biomes() {
 		profile->set_frequency_scale(e.frequency_scale);
 		profile->set_roughness(e.roughness);
 		profile->set_terrace_strength(e.terrace_strength);
+		profile->set_plateau_strength(e.plateau_strength);
 		profile->set_shape_standard(e.shape.standard);
 		profile->set_shape_billow(e.shape.billow);
 		profile->set_shape_ridged(e.shape.ridged);
@@ -338,7 +365,8 @@ Vector3 PlanetField3D::get_blended_params(const Vector3 &p_unit_dir) const {
 	}
 	d.normalize();
 	float terrace_strength = 0.f;
-	data.resolve_params(d, f, sh, amp, off, terrace_strength);
+	float plateau_strength = 0.f;
+	data.resolve_params(d, f, sh, amp, off, terrace_strength, plateau_strength);
 	const double amp_scale = data.amplitude > 0.0 ? amp / data.amplitude : 0.0;
 	const double freq_scale = f.period > 0.f ? double(data.fbm.period) / double(f.period) : 0.0;
 	return Vector3(amp_scale, freq_scale, sh.ridged);
@@ -347,7 +375,7 @@ Vector3 PlanetField3D::get_blended_params(const Vector3 &p_unit_dir) const {
 PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t p_moisture) const {
 	PlanetBlendedParams b;
 	PackedFloat32Array out;
-	out.resize(8);
+	out.resize(9);
 	if (!data.use_biomes()) {
 		// No table: the master parameters, unscaled, so the caller needs no special case.
 		out.set(0, 0.f);
@@ -358,6 +386,7 @@ PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t 
 		out.set(5, data.shape.billow);
 		out.set(6, data.shape.ridged);
 		out.set(7, 0.f);
+		out.set(8, 0.f);
 		return out;
 	}
 	data.biomes.blend(float(p_temperature), float(p_moisture), b);
@@ -369,6 +398,7 @@ PackedFloat32Array PlanetField3D::resolve_biome_at(real_t p_temperature, real_t 
 	out.set(5, b.shape.billow);
 	out.set(6, b.shape.ridged);
 	out.set(7, b.terrace_strength);
+	out.set(8, b.plateau_strength);
 	return out;
 }
 
@@ -494,6 +524,18 @@ void PlanetField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_terrace_riser", "value"), &PlanetField3D::set_terrace_riser);
 	ClassDB::bind_method(D_METHOD("get_terrace_riser"), &PlanetField3D::get_terrace_riser);
 	ClassDB::bind_method(D_METHOD("eval_unshelved_offset", "unit_dir"), &PlanetField3D::eval_unshelved_offset);
+	ClassDB::bind_method(D_METHOD("set_plateau_height", "value"), &PlanetField3D::set_plateau_height);
+	ClassDB::bind_method(D_METHOD("get_plateau_height"), &PlanetField3D::get_plateau_height);
+	ClassDB::bind_method(D_METHOD("set_plateau_period", "value"), &PlanetField3D::set_plateau_period);
+	ClassDB::bind_method(D_METHOD("get_plateau_period"), &PlanetField3D::get_plateau_period);
+	ClassDB::bind_method(D_METHOD("set_plateau_levels", "value"), &PlanetField3D::set_plateau_levels);
+	ClassDB::bind_method(D_METHOD("get_plateau_levels"), &PlanetField3D::get_plateau_levels);
+	ClassDB::bind_method(D_METHOD("set_plateau_edge", "value"), &PlanetField3D::set_plateau_edge);
+	ClassDB::bind_method(D_METHOD("get_plateau_edge"), &PlanetField3D::get_plateau_edge);
+	ClassDB::bind_method(D_METHOD("set_plateau_spread", "value"), &PlanetField3D::set_plateau_spread);
+	ClassDB::bind_method(D_METHOD("get_plateau_spread"), &PlanetField3D::get_plateau_spread);
+	ClassDB::bind_method(D_METHOD("set_plateau_seed", "value"), &PlanetField3D::set_plateau_seed);
+	ClassDB::bind_method(D_METHOD("get_plateau_seed"), &PlanetField3D::get_plateau_seed);
 	ClassDB::bind_method(D_METHOD("set_biome_kernel_radius", "value"), &PlanetField3D::set_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("get_biome_kernel_radius"), &PlanetField3D::get_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("use_default_biomes"), &PlanetField3D::use_default_biomes);
@@ -543,6 +585,12 @@ void PlanetField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_ridge", PROPERTY_HINT_RANGE, "0,4,0.001"), "set_mountain_ridge", "get_mountain_ridge");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_step", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_terrace_step", "get_terrace_step");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_riser", PROPERTY_HINT_RANGE, "0.02,1,0.001"), "set_terrace_riser", "get_terrace_riser");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_height", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_plateau_height", "get_plateau_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_period", PROPERTY_HINT_RANGE, "1,1000000,1,or_greater,suffix:m"), "set_plateau_period", "get_plateau_period");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "plateau_levels", PROPERTY_HINT_RANGE, "1,16,1"), "set_plateau_levels", "get_plateau_levels");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_edge", PROPERTY_HINT_RANGE, "0.01,1,0.001"), "set_plateau_edge", "get_plateau_edge");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_spread", PROPERTY_HINT_RANGE, "0,8,0.01"), "set_plateau_spread", "get_plateau_spread");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "plateau_seed"), "set_plateau_seed", "get_plateau_seed");
 
 
 	ADD_GROUP("Coasts", "coast_");

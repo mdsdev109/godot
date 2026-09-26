@@ -134,14 +134,20 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 	new_field.mountain_ridge = data.get("mountain_ridge", 0.0);
 	new_field.terrace_step = data.get("terrace_step", 0.0);
 	new_field.terrace_riser = data.get("terrace_riser", 0.2);
+	new_field.plateau_height = data.get("plateau_height", 0.0);
+	new_field.plateau_period = data.get("plateau_period", 8192.0);
+	new_field.plateau_levels = int(data.get("plateau_levels", 3));
+	new_field.plateau_edge = data.get("plateau_edge", 0.08);
+	new_field.plateau_spread = data.get("plateau_spread", 1.6);
+	new_field.plateau_seed = uint32_t(int64_t(data.get("plateau_seed", 4099)));
 	new_field.biomes.kernel_radius = float(double(data.get("biome_kernel_radius", 0.55)));
 	new_field.macro_map = PlanetMacroMapRegistry::get(uint64_t(int64_t(data.get("macro_map_id", 0))));
 
 	const PackedFloat64Array biome_data = data.get("biomes", PackedFloat64Array());
-	new_field.biomes.count = MIN(int(biome_data.size() / 10), PlanetBiomeTable::MAX_BIOMES);
+	new_field.biomes.count = MIN(int(biome_data.size() / 11), PlanetBiomeTable::MAX_BIOMES);
 	for (int i = 0; i < new_field.biomes.count; ++i) {
 		PlanetBiomeProfileData &e = new_field.biomes.entries[i];
-		const double *r = biome_data.ptr() + i * 10;
+		const double *r = biome_data.ptr() + i * 11;
 		e.anchor_temperature = float(r[0]);
 		e.anchor_moisture = float(r[1]);
 		e.base_elevation = float(r[2]);
@@ -152,6 +158,7 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 		e.shape.billow = float(r[7]);
 		e.shape.ridged = float(r[8]);
 		e.terrace_strength = float(r[9]);
+		e.plateau_strength = float(r[10]);
 	}
 
 	const int new_face = int(data.get("face", 0));

@@ -61,6 +61,8 @@ public:
 	real_t get_roughness() const;
 	void set_terrace_strength(real_t p_v);
 	real_t get_terrace_strength() const;
+	void set_plateau_strength(real_t p_v);
+	real_t get_plateau_strength() const;
 	void set_shape_standard(real_t p_v);
 	real_t get_shape_standard() const;
 	void set_shape_billow(real_t p_v);

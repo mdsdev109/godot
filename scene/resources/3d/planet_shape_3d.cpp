@@ -137,6 +137,12 @@ void PlanetShape3D::_update_shape() {
 	data["mountain_ridge"] = fd.mountain_ridge;
 	data["terrace_step"] = fd.terrace_step;
 	data["terrace_riser"] = fd.terrace_riser;
+	data["plateau_height"] = fd.plateau_height;
+	data["plateau_period"] = fd.plateau_period;
+	data["plateau_levels"] = fd.plateau_levels;
+	data["plateau_edge"] = fd.plateau_edge;
+	data["plateau_spread"] = fd.plateau_spread;
+	data["plateau_seed"] = int64_t(fd.plateau_seed);
 	data["biome_kernel_radius"] = fd.biomes.kernel_radius;
 
 	// The map itself travels by registry id; a Variant cannot carry the map, and copying it per patch
@@ -147,10 +153,10 @@ void PlanetShape3D::_update_shape() {
 	// Ten floats per biome, flat, because a Variant array of dictionaries would allocate on every
 	// shape update and there are dozens of patches.
 	PackedFloat64Array biome_data;
-	biome_data.resize(fd.biomes.count * 10);
+	biome_data.resize(fd.biomes.count * 11);
 	for (int i = 0; i < fd.biomes.count; ++i) {
 		const PlanetBiomeProfileData &e = fd.biomes.entries[i];
-		double *w = biome_data.ptrw() + i * 10;
+		double *w = biome_data.ptrw() + i * 11;
 		w[0] = e.anchor_temperature;
 		w[1] = e.anchor_moisture;
 		w[2] = e.base_elevation;
@@ -161,6 +167,7 @@ void PlanetShape3D::_update_shape() {
 		w[7] = e.shape.billow;
 		w[8] = e.shape.ridged;
 		w[9] = e.terrace_strength;
+		w[10] = e.plateau_strength;
 	}
 	data["biomes"] = biome_data;
 
