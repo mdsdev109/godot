@@ -46,6 +46,8 @@ public:
 		double blur_m = 15.0;
 		double wall_slope_start = 0.75;
 		double wall_slope_full = 1.1;
+		double apron_slope_start = 0.35;
+		double apron_slope_full = 0.0;
 		double offset_m = 5.0;
 		double ridge_m = 1.2;
 		double ridge_period_m = 9.0;

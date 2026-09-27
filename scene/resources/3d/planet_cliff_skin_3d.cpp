@@ -299,6 +299,8 @@ PlanetCliffSkin3D::Params PlanetCliffSkin3D::params_from_dictionary(const Dictio
 	PCS_READ(blur_m, double)
 	PCS_READ(wall_slope_start, double)
 	PCS_READ(wall_slope_full, double)
+	PCS_READ(apron_slope_start, double)
+	PCS_READ(apron_slope_full, double)
 	PCS_READ(offset_m, double)
 	PCS_READ(ridge_m, double)
 	PCS_READ(ridge_period_m, double)
@@ -361,7 +363,8 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 	const int blur = MAX(1, int(Math::round(prm.blur_m / prm.step_m * 0.5)));
 	const int lip_r = MAX(1, int(Math::round(prm.lip_width_m / prm.step_m)));
 	const int foot_r = MAX(1, int(Math::round(prm.foot_search_m / prm.step_m)));
-	const int halo = 2 * blur + lip_r + 5 + 3 + prm.smooth_r + 1 + foot_r;
+	// One more foot_r than before: the apron dilates the wall mask by it before everything else reads it.
+	const int halo = 2 * blur + lip_r + 5 + 3 + prm.smooth_r + 1 + 2 * foot_r;
 	const int n = n_core + 1 + 2 * halo;
 	const int nn = n * n;
 	const int gi0 = p_ci * n_core - halo;
@@ -433,6 +436,27 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 	}
 
 	// 3. Filters: inner wall, lip extent, smoothed gradient, foot and rim heights, wall slope, scale.
+	// The apron: slope that is still steep, though not wall, within the foot search of a wall joins it.
+	// Without it the face covered only the steepest band of a short or shallow slope, stood vertical
+	// over the ground far below, and pulled back in where the band ended partway down -- a brim over
+	// an undercut, like the rim of a hat. With it the face runs down to where the slope really flattens.
+	// Only BELOW the wall: the apron carries the face down to its foot, never up over the flank above
+	// it, which on a mountain would wrap the whole slope in rock.
+	if (prm.apron_slope_full > prm.apron_slope_start) {
+		const Grid near_wall = extreme2d(mask, n, foot_r, true);
+		Grid wall_h;
+		wall_h.resize(nn);
+		for (int i = 0; i < nn; i++) {
+			wall_h[i] = mask[i] > 0.5 ? h[i] : 1e30;
+		}
+		const Grid wall_low = extreme2d(wall_h, n, foot_r, false);
+		for (int i = 0; i < nn; i++) {
+			const double below = 1.0 - smoothstep(-1.0, 2.0, h[i] - wall_low[i]);
+			const double apron = smoothstep(prm.apron_slope_start, prm.apron_slope_full, grads[i].length())
+					* smoothstep(0.3, 0.7, near_wall[i]) * below;
+			mask[i] = MAX(mask[i], apron);
+		}
+	}
 	const Grid inner = extreme2d(mask, n, blur, false);
 	const Grid ext = box_blur(extreme2d(mask, n, lip_r, true), n, 2);
 	LocalVector<Vector3> gsmooth;
@@ -454,7 +478,24 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 			gsmooth[i] = Vector3(xs[i], ys[i], zs[i]);
 		}
 	}
-	const Grid hmin = extreme2d(h, n, foot_r, false);
+	// The foot the face stands over is the lowest point of the WALL nearby, not the lowest ground. On a
+	// short or shallow slope the wall mask covers only its steepest band; standing the face over ground
+	// far below that band pushed the lip out over the rest of the slope while the face's own bottom edge
+	// tucked back in where the band ended -- a brim over an undercut, like the rim of a hat. Over the
+	// wall's own foot the face is vertical down to where it really ends, and the slope below stays
+	// terrain. Where no wall is near, the lowest ground stands in, as before.
+	const Grid ground_low = extreme2d(h, n, foot_r, false);
+	Grid wall_h;
+	wall_h.resize(nn);
+	for (int i = 0; i < nn; i++) {
+		wall_h[i] = mask[i] > 0.5 ? h[i] : 1e30;
+	}
+	const Grid wall_low = extreme2d(wall_h, n, foot_r, false);
+	Grid hmin;
+	hmin.resize(nn);
+	for (int i = 0; i < nn; i++) {
+		hmin[i] = wall_low[i] < 1e29 ? MAX(wall_low[i], ground_low[i]) : ground_low[i];
+	}
 	const Grid hmax = extreme2d(h, n, foot_r, true);
 	Grid gslope;
 	gslope.resize(nn);
@@ -510,7 +551,7 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 			sink[k] = prm.foot_sink_m * smoothstep(0.0, 0.6, foot) + prm.edge_sink_m * (1.0 - cover);
 			if (prm.vertical_face) {
 				lift[k] = prm.lip_height_m * sk * smoothstep(0.0, 0.4, lip);
-				const double reach = MIN((h[k] - hmin[k]) / MAX(wall_slope[k], 0.35), prm.max_reach_m);
+				const double reach = CLAMP((h[k] - hmin[k]) / MAX(wall_slope[k], 0.35), 0.0, prm.max_reach_m);
 				const double lip_shift = sk * (0.5 * (prm.lip_push_out_m - prm.lip_pull_in_m) + 0.5 * (prm.lip_push_out_m + prm.lip_pull_in_m) * noise.band(Vector3(q.x, q.y, 0.0), prm.lip_shift_period_m, sk, 14, prm.face_spacing_m));
 				const double up_frac = CLAMP((h[k] - hmin[k]) / MAX(hmax[k] - hmin[k], 1.0), 0.0, 1.0);
 				push[k] = MAX(m, at_rim) * reach + lip_shift * MAX(m * up_frac, at_rim) + prm.vertical_offset_m * sk * cover;
