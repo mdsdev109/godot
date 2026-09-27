@@ -135,7 +135,8 @@ void PlanetNetLink::send(int p_peer, int p_channel, const LocalVector<uint8_t> &
 
 void PlanetNetLink::_send_now(int p_peer, int p_channel, const uint8_t *p_data, uint32_t p_size, bool p_reliable) {
 	const Ref<ENetPacketPeer> *peer = peers.getptr(p_peer);
-	if (peer == nullptr || peer->is_null() || !(*peer)->is_active()) {
+	// Only to peers fully connected: one being refused or still handshaking has no channels yet.
+	if (peer == nullptr || peer->is_null() || (*peer)->get_state() != ENetPacketPeer::STATE_CONNECTED) {
 		return;
 	}
 	// Unreliable packets bigger than the MTU are fragmented unreliably too, rather than being upgraded

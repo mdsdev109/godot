@@ -99,6 +99,12 @@ void PlanetNetClient::poll(double p_delta) {
 				Writer w;
 				w.u8(MSG_HELLO);
 				w.u16(PROTOCOL_VERSION);
+				const CharString key = player_key.utf8();
+				const int length = MIN(key.length(), 1024);
+				w.u16(uint16_t(length));
+				for (int i = 0; i < length; ++i) {
+					w.u8(uint8_t(key[i]));
+				}
 				link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
 				_send_ping();
 			} break;
@@ -152,13 +158,13 @@ void PlanetNetClient::_advance_prediction(double p_delta) {
 	}
 }
 
-void PlanetNetClient::_confirm(uint32_t p_tick, const Vector3 &p_position, const Vector3 &p_velocity) {
+void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
+	const Vector3 &p_position = p_state.position;
 	if (!predicting) {
 		// The first word from the server about our own player: predict from there.
 		predicting = true;
 		predicted_tick = p_tick;
-		predicted.position = p_position;
-		predicted.velocity = p_velocity;
+		predicted = p_state;
 		frames.clear();
 		last_confirmed_tick = p_tick;
 		return;
@@ -180,15 +186,14 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const Vector3 &p_position, const
 			++prediction_resets;
 			smoothing += predicted.position - p_position;
 			predicted_tick = p_tick;
-			predicted.position = p_position;
-			predicted.velocity = p_velocity;
+			predicted = p_state;
 			frames.clear();
 		}
 		return;
 	}
 	++prediction_compared;
 	const Vector3 mine = frames[at].state.position;
-	if (mine == p_position) {
+	if (mine == p_position && frames[at].state.reference == p_state.reference) {
 		++prediction_exact;
 		return;
 	}
@@ -197,9 +202,7 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const Vector3 &p_position, const
 	++prediction_corrections;
 	prediction_worst = MAX(prediction_worst, double(mine.distance_to(p_position)));
 	const Vector3 before = predicted.position;
-	WalkerState s;
-	s.position = p_position;
-	s.velocity = p_velocity;
+	WalkerState s = p_state;
 	s.rotation = frames[at].state.rotation;
 	frames[at].state = s;
 	for (uint32_t i = uint32_t(at) + 1; i < frames.size(); ++i) {
@@ -390,23 +393,18 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 	const uint32_t tick = r_reader.u32();
 	const uint32_t applied = r_reader.u32();
 	if (applied != 0) {
-		Vector3 position;
-		Vector3 velocity;
-		position.x = r_reader.f64();
-		position.y = r_reader.f64();
-		position.z = r_reader.f64();
-		velocity.x = r_reader.f64();
-		velocity.y = r_reader.f64();
-		velocity.z = r_reader.f64();
+		WalkerState state;
+		state.position.x = r_reader.f64();
+		state.position.y = r_reader.f64();
+		state.position.z = r_reader.f64();
+		state.velocity.x = r_reader.f64();
+		state.velocity.y = r_reader.f64();
+		state.velocity.z = r_reader.f64();
+		state.reference.x = r_reader.f64();
+		state.reference.y = r_reader.f64();
+		state.reference.z = r_reader.f64();
 		if (r_reader.ok()) {
-			_confirm(applied, position, velocity);
-		}
-	} else if (r_reader.ok() && !predicting && local_entity != 0) {
-		// The server has no input from us yet. Start predicting from where it has us, so that inputs
-		// start flowing; its first applied tick then confirms or corrects.
-		const Tracked *self = tracked.getptr(local_entity);
-		if (self != nullptr && !self->samples.is_empty()) {
-			_confirm(tick, self->samples[self->samples.size() - 1].state.position, Vector3());
+			_confirm(applied, state);
 		}
 	}
 	const uint16_t n = r_reader.u16();
@@ -578,6 +576,9 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_interpolation_delay_ms", "ms"), &PlanetNetClient::set_interpolation_delay_ms);
 	ClassDB::bind_method(D_METHOD("get_interpolation_delay_ms"), &PlanetNetClient::get_interpolation_delay_ms);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interpolation_delay_ms", PROPERTY_HINT_RANGE, "0,500,1,suffix:ms"), "set_interpolation_delay_ms", "get_interpolation_delay_ms");
+	ClassDB::bind_method(D_METHOD("set_player_key", "key"), &PlanetNetClient::set_player_key);
+	ClassDB::bind_method(D_METHOD("get_player_key"), &PlanetNetClient::get_player_key);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_key"), "set_player_key", "get_player_key");
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetNetClient::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetClient::get_field);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");

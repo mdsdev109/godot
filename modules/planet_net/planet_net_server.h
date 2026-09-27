@@ -83,9 +83,17 @@ private:
 		LocalVector<uint32_t> removal_epochs;
 	};
 
+	// A player as saved: who they are, which entity is theirs, and where they were when last seen.
+	struct PlayerRecord {
+		uint64_t entity = 0;
+		PlanetNet::EntityState state;
+		bool online = false;
+	};
+
 	struct Client {
 		uint64_t entity = 0;
 		bool welcomed = false;
+		String player_key;
 		// Inputs by the tick they are for. The step for tick T applies inputs[T], or repeats the last
 		// input when it has not arrived; a late input is then useless and the client will be corrected.
 		HashMap<uint32_t, PlanetNet::WalkerInput> inputs;
@@ -113,6 +121,10 @@ private:
 		int owner_peer = 0;
 		uint32_t region = 0;
 		bool indexed = false;
+		// Saved with its region. Players are not: they are saved under their key and exist in the world
+		// only while connected.
+		bool persistent = true;
+		Vector3 walk_reference; // players only: see WalkerState::reference
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -142,6 +154,18 @@ private:
 	void _interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const;
 	void _send_snapshot(int p_peer, Client &r_client);
 	void _record_history(Entity &r_entity);
+
+	// Persistence: see save_world().
+	String world_path;
+	double autosave_interval = 0.0;
+	double autosave_timer = 0.0;
+	HashMap<String, PlayerRecord> players;
+	HashSet<uint32_t> saved_regions; // regions that have a file on disk
+	Dictionary last_load_report;
+	uint64_t _create_with_id(uint64_t p_id, int p_type, const Vector3 &p_position);
+	void _release_client(Client &r_client);
+	Error _write_file(const String &p_name, PlanetNet::Writer &r_writer) const;
+	Error _read_file(const String &p_name, uint32_t p_magic, LocalVector<uint8_t> &r_bytes) const;
 
 protected:
 	static void _bind_methods();
@@ -196,6 +220,24 @@ public:
 
 	Dictionary get_stats() const;
 	Dictionary get_client_stats(int p_peer) const;
+
+	// The world on disk: one file per occupied region holding its persistent entities, plus the
+	// players table and a header. Written atomically (temporary file, then rename); a region that
+	// has emptied loses its file. Load before listening, into an empty world.
+	void set_world_path(const String &p_path) { world_path = p_path; }
+	String get_world_path() const { return world_path; }
+	// Seconds between automatic saves while polling; 0 disables them.
+	void set_autosave_interval(double p_seconds) { autosave_interval = MAX(p_seconds, 0.0); }
+	double get_autosave_interval() const { return autosave_interval; }
+	Error save_world();
+	Error load_world();
+	// What the last load found: regions, entities, players, and any files it had to skip.
+	Dictionary get_last_load_report() const { return last_load_report; }
+	void set_entity_persistent(int64_t p_id, bool p_persistent);
+	bool is_entity_persistent(int64_t p_id) const;
+	PackedStringArray get_player_keys() const;
+	int64_t get_player_entity(const String &p_key) const;
+	Vector3 get_player_position(const String &p_key) const;
 	// The input the server applied to the client's player at a recent tick, and whether it arrived in
 	// time or was repeated from the tick before: {tick, move, yaw, arrived, position}, or {} if too old.
 	Dictionary get_client_applied(int p_peer, int p_tick) const;

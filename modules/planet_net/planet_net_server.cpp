@@ -30,25 +30,47 @@
 
 #include "planet_net_server.h"
 
-#include "core/math/planet_det_math.h"
+#include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/object/class_db.h"
 
 using namespace PlanetNet;
 
 Error PlanetNetServer::listen(int p_port, int p_max_clients) {
-	stop();
+	ERR_FAIL_COND_V_MSG(link.is_open(), ERR_ALREADY_IN_USE, "Already listening; stop() first.");
 	_configure_regions();
 	return link.listen(p_port, p_max_clients);
 }
 
+// Closes the host. The world stays: connected players are recorded under their keys and leave it,
+// everything else remains, so a script can save_world() after stopping.
 void PlanetNetServer::stop() {
-	link.close();
+	for (KeyValue<int, Client> &C : clients) {
+		_release_client(C.value);
+	}
 	clients.clear();
-	entities.clear();
-	region_index.clear();
+	link.close();
 	tick = 0;
 	snapshot_seq = 0;
 	accumulator = 0.0;
+}
+
+void PlanetNetServer::_release_client(Client &r_client) {
+	if (r_client.entity == 0) {
+		return;
+	}
+	const Entity *e = entities.getptr(r_client.entity);
+	if (!r_client.player_key.is_empty()) {
+		PlayerRecord *rec = players.getptr(r_client.player_key);
+		if (rec != nullptr) {
+			if (e != nullptr) {
+				rec->state = e->state;
+			}
+			rec->online = false;
+		}
+	}
+	destroy_entity(int64_t(r_client.entity));
+	r_client.entity = 0;
 }
 
 void PlanetNetServer::set_link_conditions(double p_latency_ms, double p_jitter_ms, double p_loss) {
@@ -107,8 +129,16 @@ void PlanetNetServer::_unindex(uint64_t p_id, Entity &r_entity) {
 }
 
 int64_t PlanetNetServer::create_entity(int p_type, const Vector3 &p_position) {
+	return int64_t(_create_with_id((uint64_t(server_id) << ENTITY_SERVER_SHIFT) | next_entity++, p_type, p_position));
+}
+
+uint64_t PlanetNetServer::_create_with_id(uint64_t p_id, int p_type, const Vector3 &p_position) {
+	ERR_FAIL_COND_V_MSG(entities.has(p_id), 0, "Entity id already in use.");
+	if ((p_id >> ENTITY_SERVER_SHIFT) == server_id) {
+		next_entity = MAX(next_entity, (p_id & ((uint64_t(1) << ENTITY_SERVER_SHIFT) - 1)) + 1);
+	}
 	Entity e;
-	e.state.id = (uint64_t(server_id) << ENTITY_SERVER_SHIFT) | next_entity++;
+	e.state.id = p_id;
 	e.state.type = uint16_t(p_type);
 	e.state.position = p_position;
 	for (int i = 0; i < HISTORY_TICKS; ++i) {
@@ -118,7 +148,7 @@ int64_t PlanetNetServer::create_entity(int p_type, const Vector3 &p_position) {
 	const uint64_t id = e.state.id;
 	entities.insert(id, e);
 	_index(id, entities[id]);
-	return int64_t(id);
+	return id;
 }
 
 void PlanetNetServer::destroy_entity(int64_t p_id) {
@@ -225,11 +255,9 @@ void PlanetNetServer::poll(double p_delta) {
 				clients.insert(ev.peer, Client());
 				break;
 			case PlanetNetLink::EVENT_DISCONNECTED: {
-				const Client *c = clients.getptr(ev.peer);
+				Client *c = clients.getptr(ev.peer);
 				if (c != nullptr) {
-					if (c->entity != 0) {
-						destroy_entity(int64_t(c->entity));
-					}
+					_release_client(*c);
 					clients.erase(ev.peer);
 					emit_signal(SNAME("client_disconnected"), ev.peer);
 				}
@@ -237,6 +265,14 @@ void PlanetNetServer::poll(double p_delta) {
 			case PlanetNetLink::EVENT_RECEIVED:
 				_handle(ev.peer, ev.data);
 				break;
+		}
+	}
+
+	if (autosave_interval > 0.0 && !world_path.is_empty()) {
+		autosave_timer += p_delta;
+		if (autosave_timer >= autosave_interval) {
+			autosave_timer = 0.0;
+			save_world();
 		}
 	}
 
@@ -259,6 +295,13 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 	switch (type) {
 		case MSG_HELLO: {
 			const uint16_t version = r.u16();
+			const uint16_t key_length = r.u16();
+			CharString key_utf8;
+			key_utf8.resize_uninitialized(key_length + 1);
+			for (uint16_t i = 0; i < key_length; ++i) {
+				key_utf8.ptrw()[i] = char(r.u8());
+			}
+			key_utf8.ptrw()[key_length] = 0;
 			if (!r.ok() || version != PROTOCOL_VERSION) {
 				link.disconnect_peer(p_peer);
 				return;
@@ -266,12 +309,44 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			if (client->welcomed) {
 				return;
 			}
-			// Players start near the +Y pole, spread out so they do not stack.
-			const double spread = 20.0 / planet_radius;
-			const Vector3 dir = Vector3(spread * double(p_peer % 8), 1.0, spread * double(p_peer / 8)).normalized();
-			const int64_t id = create_entity(ENTITY_TYPE_PLAYER, walker.surface_point(dir));
-			entities[uint64_t(id)].owner_peer = p_peer;
+			const String key = String::utf8(key_utf8.get_data(), key_length);
+			PlayerRecord *known = key.is_empty() ? nullptr : players.getptr(key);
+			if (known != nullptr && known->online) {
+				// The same player twice at once: refuse the newcomer rather than split one identity.
+				link.disconnect_peer(p_peer);
+				return;
+			}
+			int64_t id = 0;
+			if (known != nullptr) {
+				// Back where they left, as the same entity.
+				id = int64_t(_create_with_id(known->entity, ENTITY_TYPE_PLAYER, known->state.position));
+				if (id == 0) {
+					link.disconnect_peer(p_peer);
+					return;
+				}
+				Entity &e = entities[uint64_t(id)];
+				e.state.rotation = known->state.rotation;
+				e.state.velocity = known->state.velocity;
+			} else {
+				// New players start near the +Y pole, spread out so they do not stack.
+				const double spread = 20.0 / planet_radius;
+				const Vector3 dir = Vector3(spread * double(p_peer % 8), 1.0, spread * double(p_peer / 8)).normalized();
+				id = create_entity(ENTITY_TYPE_PLAYER, walker.surface_point(dir));
+				if (!key.is_empty()) {
+					PlayerRecord rec;
+					rec.entity = uint64_t(id);
+					rec.state = entities[uint64_t(id)].state;
+					players.insert(key, rec);
+				}
+			}
+			if (!key.is_empty()) {
+				players[key].online = true;
+			}
+			Entity &player = entities[uint64_t(id)];
+			player.owner_peer = p_peer;
+			player.persistent = false;
 			client->entity = uint64_t(id);
+			client->player_key = key;
 			client->welcomed = true;
 
 			Writer w;
@@ -376,10 +451,12 @@ void PlanetNetServer::_step() {
 		s.position = e->state.position;
 		s.velocity = e->state.velocity;
 		s.rotation = e->state.rotation;
+		s.reference = e->walk_reference;
 		s = walker.step(s, client.last_input, dt);
 		e->state.position = s.position;
 		e->state.velocity = s.velocity;
 		e->state.rotation = s.rotation;
+		e->walk_reference = s.reference;
 		// Reported even before any input arrives, so the client starts predicting from the exact state.
 		client.last_applied_tick = tick;
 		const int slot = int(tick % HISTORY_TICKS);
@@ -531,6 +608,9 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 		w.f64(double(self->state.velocity.x));
 		w.f64(double(self->state.velocity.y));
 		w.f64(double(self->state.velocity.z));
+		w.f64(double(self->walk_reference.x));
+		w.f64(double(self->walk_reference.y));
+		w.f64(double(self->walk_reference.z));
 	}
 	const uint32_t count_at = w.size();
 	w.u16(0);
@@ -614,6 +694,301 @@ Dictionary PlanetNetServer::get_client_applied(int p_peer, int p_tick) const {
 	return d;
 }
 
+// ---------------------------------------------------------------- persistence
+
+namespace {
+
+constexpr uint32_t MAGIC_WORLD = 0x44574e50; // "PNWD"
+constexpr uint32_t MAGIC_REGION = 0x47524e50; // "PNRG"
+constexpr uint32_t MAGIC_PLAYERS = 0x4c504e50; // "PNPL"
+constexpr uint16_t FILE_FORMAT = 1;
+
+void write_state(PlanetNet::Writer &w, const PlanetNet::EntityState &s) {
+	w.f64(double(s.position.x));
+	w.f64(double(s.position.y));
+	w.f64(double(s.position.z));
+	w.f32(float(s.rotation.x));
+	w.f32(float(s.rotation.y));
+	w.f32(float(s.rotation.z));
+	w.f32(float(s.rotation.w));
+	w.f32(float(s.velocity.x));
+	w.f32(float(s.velocity.y));
+	w.f32(float(s.velocity.z));
+}
+
+void read_state(PlanetNet::Reader &r, PlanetNet::EntityState &s) {
+	s.position.x = r.f64();
+	s.position.y = r.f64();
+	s.position.z = r.f64();
+	s.rotation.x = r.f32();
+	s.rotation.y = r.f32();
+	s.rotation.z = r.f32();
+	s.rotation.w = r.f32();
+	s.velocity.x = r.f32();
+	s.velocity.y = r.f32();
+	s.velocity.z = r.f32();
+}
+
+String region_file(uint32_t p_key) {
+	return "region_" + String::num_uint64(p_key, 16).lpad(8, "0") + ".bin";
+}
+
+} // namespace
+
+Error PlanetNetServer::_write_file(const String &p_name, Writer &r_writer) const {
+	r_writer.u64(checksum(r_writer.data().ptr(), r_writer.size()));
+	const String path = world_path.path_join(p_name);
+	const String temp = path + ".tmp";
+	{
+		Ref<FileAccess> f = FileAccess::open(temp, FileAccess::WRITE);
+		if (f.is_null()) {
+			return ERR_FILE_CANT_WRITE;
+		}
+		f->store_buffer(r_writer.data().ptr(), r_writer.size());
+		if (f->get_error() != OK) {
+			return ERR_FILE_CANT_WRITE;
+		}
+	}
+	if (FileAccess::exists(path)) {
+		DirAccess::remove_absolute(path);
+	}
+	return DirAccess::rename_absolute(temp, path);
+}
+
+Error PlanetNetServer::_read_file(const String &p_name, uint32_t p_magic, LocalVector<uint8_t> &r_bytes) const {
+	const String path = world_path.path_join(p_name);
+	if (!FileAccess::exists(path)) {
+		return ERR_FILE_NOT_FOUND;
+	}
+	const Vector<uint8_t> bytes = FileAccess::get_file_as_bytes(path);
+	if (bytes.size() < 4 + 2 + 8) {
+		return ERR_FILE_CORRUPT;
+	}
+	const uint32_t body = uint32_t(bytes.size()) - 8;
+	uint64_t stored = 0;
+	memcpy(&stored, bytes.ptr() + body, 8);
+	uint32_t magic = 0;
+	memcpy(&magic, bytes.ptr(), 4);
+	uint16_t format = 0;
+	memcpy(&format, bytes.ptr() + 4, 2);
+	if (magic != p_magic || format != FILE_FORMAT || stored != checksum(bytes.ptr(), body)) {
+		return ERR_FILE_CORRUPT;
+	}
+	r_bytes.resize(body - 6);
+	memcpy(r_bytes.ptr(), bytes.ptr() + 6, body - 6);
+	return OK;
+}
+
+Error PlanetNetServer::save_world() {
+	ERR_FAIL_COND_V_MSG(world_path.is_empty(), ERR_UNCONFIGURED, "Set world_path before saving.");
+	Error err = DirAccess::make_dir_recursive_absolute(world_path);
+	if (err != OK && err != ERR_ALREADY_EXISTS) {
+		return err;
+	}
+	err = OK;
+
+	HashMap<uint32_t, LocalVector<uint64_t>> by_region;
+	for (const KeyValue<uint64_t, Entity> &E : entities) {
+		if (E.value.persistent) {
+			by_region[regions.key_of(E.value.state.position)].push_back(E.key);
+		}
+	}
+	for (const KeyValue<uint32_t, LocalVector<uint64_t>> &R : by_region) {
+		Writer w;
+		w.u32(MAGIC_REGION);
+		w.u16(FILE_FORMAT);
+		w.u32(R.key);
+		w.u32(R.value.size());
+		for (const uint64_t id : R.value) {
+			const Entity &e = entities[id];
+			w.u64(id);
+			w.u16(e.state.type);
+			w.u64(e.state.frame);
+			write_state(w, e.state);
+		}
+		const Error e = _write_file(region_file(R.key), w);
+		err = err == OK ? e : err;
+	}
+	// Regions that emptied since the last save lose their files, or their entities would come back.
+	for (const uint32_t key : saved_regions) {
+		if (!by_region.has(key)) {
+			DirAccess::remove_absolute(world_path.path_join(region_file(key)));
+		}
+	}
+	saved_regions.clear();
+	for (const KeyValue<uint32_t, LocalVector<uint64_t>> &R : by_region) {
+		saved_regions.insert(R.key);
+	}
+
+	Writer p;
+	p.u32(MAGIC_PLAYERS);
+	p.u16(FILE_FORMAT);
+	p.u32(players.size());
+	for (const KeyValue<String, PlayerRecord> &P : players) {
+		const CharString key = P.key.utf8();
+		p.u16(uint16_t(key.length()));
+		for (int i = 0; i < key.length(); ++i) {
+			p.u8(uint8_t(key[i]));
+		}
+		p.u64(P.value.entity);
+		// Connected players are saved where they are now, not where they logged in.
+		const Entity *live = P.value.online ? entities.getptr(P.value.entity) : nullptr;
+		write_state(p, live != nullptr ? live->state : P.value.state);
+	}
+	const Error pe = _write_file("players.bin", p);
+	err = err == OK ? pe : err;
+
+	Writer h;
+	h.u32(MAGIC_WORLD);
+	h.u16(FILE_FORMAT);
+	h.u16(server_id);
+	h.u64(next_entity);
+	const Error he = _write_file("world.bin", h);
+	return err == OK ? he : err;
+}
+
+Error PlanetNetServer::load_world() {
+	ERR_FAIL_COND_V_MSG(world_path.is_empty(), ERR_UNCONFIGURED, "Set world_path before loading.");
+	ERR_FAIL_COND_V_MSG(!clients.is_empty(), ERR_BUSY, "Load the world before clients connect.");
+	entities.clear();
+	region_index.clear();
+	players.clear();
+	saved_regions.clear();
+	regions.configure(planet_radius, region_size);
+
+	int region_count = 0;
+	int entity_count = 0;
+	PackedStringArray skipped;
+	Error result = OK;
+
+	LocalVector<uint8_t> bytes;
+	if (_read_file("world.bin", MAGIC_WORLD, bytes) == OK) {
+		Reader r(bytes.ptr(), bytes.size());
+		r.u16(); // the id of the server that saved it; ids keep their own
+		const uint64_t saved_next = r.u64();
+		if (r.ok()) {
+			next_entity = MAX(next_entity, saved_next);
+		}
+	}
+
+	if (DirAccess::dir_exists_absolute(world_path)) {
+		for (const String &name : DirAccess::get_files_at(world_path)) {
+			if (!name.begins_with("region_") || !name.ends_with(".bin")) {
+				continue;
+			}
+			const uint32_t key = uint32_t(name.trim_prefix("region_").trim_suffix(".bin").hex_to_int());
+			// Known on disk either way, so the next save rewrites or removes it.
+			saved_regions.insert(key);
+			Error e = _read_file(name, MAGIC_REGION, bytes);
+			if (e == OK) {
+				Reader r(bytes.ptr(), bytes.size());
+				r.u32(); // region key, also in the name
+				const uint32_t n = r.u32();
+				LocalVector<EntityState> loaded;
+				for (uint32_t i = 0; i < n && r.ok(); ++i) {
+					EntityState s;
+					s.id = r.u64();
+					s.type = r.u16();
+					s.frame = r.u64();
+					read_state(r, s);
+					loaded.push_back(s);
+				}
+				if (!r.ok()) {
+					e = ERR_FILE_CORRUPT;
+				} else {
+					for (const EntityState &s : loaded) {
+						if (_create_with_id(s.id, s.type, s.position) != 0) {
+							Entity &ent = entities[s.id];
+							ent.state = s;
+							++entity_count;
+						}
+					}
+					++region_count;
+				}
+			}
+			if (e != OK) {
+				skipped.push_back(name);
+				result = ERR_FILE_CORRUPT;
+			}
+		}
+	}
+
+	int player_count = 0;
+	const Error pe = _read_file("players.bin", MAGIC_PLAYERS, bytes);
+	if (pe == OK) {
+		Reader r(bytes.ptr(), bytes.size());
+		const uint32_t n = r.u32();
+		for (uint32_t i = 0; i < n && r.ok(); ++i) {
+			const uint16_t len = r.u16();
+			CharString key_utf8;
+			key_utf8.resize_uninitialized(len + 1);
+			for (uint16_t k = 0; k < len; ++k) {
+				key_utf8.ptrw()[k] = char(r.u8());
+			}
+			key_utf8.ptrw()[len] = 0;
+			PlayerRecord rec;
+			rec.entity = r.u64();
+			read_state(r, rec.state);
+			rec.state.id = rec.entity;
+			rec.state.type = ENTITY_TYPE_PLAYER;
+			if (r.ok()) {
+				players.insert(String::utf8(key_utf8.get_data(), len), rec);
+				++player_count;
+				if ((rec.entity >> ENTITY_SERVER_SHIFT) == server_id) {
+					next_entity = MAX(next_entity, (rec.entity & ((uint64_t(1) << ENTITY_SERVER_SHIFT) - 1)) + 1);
+				}
+			}
+		}
+		if (!r.ok()) {
+			skipped.push_back("players.bin");
+			result = ERR_FILE_CORRUPT;
+		}
+	} else if (pe != ERR_FILE_NOT_FOUND) {
+		skipped.push_back("players.bin");
+		result = ERR_FILE_CORRUPT;
+	}
+
+	last_load_report = Dictionary();
+	last_load_report["regions"] = region_count;
+	last_load_report["entities"] = entity_count;
+	last_load_report["players"] = player_count;
+	last_load_report["skipped"] = skipped;
+	return result;
+}
+
+void PlanetNetServer::set_entity_persistent(int64_t p_id, bool p_persistent) {
+	Entity *e = entities.getptr(uint64_t(p_id));
+	ERR_FAIL_NULL(e);
+	e->persistent = p_persistent;
+}
+
+bool PlanetNetServer::is_entity_persistent(int64_t p_id) const {
+	const Entity *e = entities.getptr(uint64_t(p_id));
+	return e != nullptr && e->persistent;
+}
+
+PackedStringArray PlanetNetServer::get_player_keys() const {
+	PackedStringArray keys;
+	for (const KeyValue<String, PlayerRecord> &P : players) {
+		keys.push_back(P.key);
+	}
+	return keys;
+}
+
+int64_t PlanetNetServer::get_player_entity(const String &p_key) const {
+	const PlayerRecord *rec = players.getptr(p_key);
+	return rec != nullptr ? int64_t(rec->entity) : 0;
+}
+
+Vector3 PlanetNetServer::get_player_position(const String &p_key) const {
+	const PlayerRecord *rec = players.getptr(p_key);
+	if (rec == nullptr) {
+		return Vector3();
+	}
+	const Entity *live = rec->online ? entities.getptr(rec->entity) : nullptr;
+	return live != nullptr ? live->state.position : rec->state.position;
+}
+
 void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("listen", "port", "max_clients"), &PlanetNetServer::listen, DEFVAL(64));
 	ClassDB::bind_method(D_METHOD("stop"), &PlanetNetServer::stop);
@@ -665,6 +1040,21 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetServer::get_stats);
 	ClassDB::bind_method(D_METHOD("get_client_stats", "peer"), &PlanetNetServer::get_client_stats);
 	ClassDB::bind_method(D_METHOD("get_client_applied", "peer", "tick"), &PlanetNetServer::get_client_applied);
+
+	ClassDB::bind_method(D_METHOD("set_world_path", "path"), &PlanetNetServer::set_world_path);
+	ClassDB::bind_method(D_METHOD("get_world_path"), &PlanetNetServer::get_world_path);
+	ClassDB::bind_method(D_METHOD("set_autosave_interval", "seconds"), &PlanetNetServer::set_autosave_interval);
+	ClassDB::bind_method(D_METHOD("get_autosave_interval"), &PlanetNetServer::get_autosave_interval);
+	ADD_PROPERTY(PropertyInfo(Variant::STRING, "world_path", PROPERTY_HINT_DIR), "set_world_path", "get_world_path");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "autosave_interval", PROPERTY_HINT_RANGE, "0,3600,0.1,suffix:s"), "set_autosave_interval", "get_autosave_interval");
+	ClassDB::bind_method(D_METHOD("save_world"), &PlanetNetServer::save_world);
+	ClassDB::bind_method(D_METHOD("load_world"), &PlanetNetServer::load_world);
+	ClassDB::bind_method(D_METHOD("get_last_load_report"), &PlanetNetServer::get_last_load_report);
+	ClassDB::bind_method(D_METHOD("set_entity_persistent", "id", "persistent"), &PlanetNetServer::set_entity_persistent);
+	ClassDB::bind_method(D_METHOD("is_entity_persistent", "id"), &PlanetNetServer::is_entity_persistent);
+	ClassDB::bind_method(D_METHOD("get_player_keys"), &PlanetNetServer::get_player_keys);
+	ClassDB::bind_method(D_METHOD("get_player_entity", "key"), &PlanetNetServer::get_player_entity);
+	ClassDB::bind_method(D_METHOD("get_player_position", "key"), &PlanetNetServer::get_player_position);
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("client_disconnected", PropertyInfo(Variant::INT, "peer")));

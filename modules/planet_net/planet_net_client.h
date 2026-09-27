@@ -115,6 +115,7 @@ private:
 	uint32_t last_ack_tick = 0;
 
 	PlanetNet::Walker walker;
+	String player_key;
 	double prediction_lead_ticks = 2.0;
 	bool predicting = false;
 	uint32_t predicted_tick = 0;
@@ -136,7 +137,7 @@ private:
 	void _send_ping();
 	void _send_input();
 	void _advance_prediction(double p_delta);
-	void _confirm(uint32_t p_tick, const Vector3 &p_position, const Vector3 &p_velocity);
+	void _confirm(uint32_t p_tick, const PlanetNet::WalkerState &p_state);
 	bool _sample(uint64_t p_id, PlanetNet::EntityState &r_state) const;
 
 protected:
@@ -160,6 +161,11 @@ public:
 	double get_rtt_ms() const { return last_rtt * 1000.0; }
 	void set_interpolation_delay_ms(double p_ms) { interpolation_delay_ticks = p_ms * 0.001 * PlanetNet::TICK_HZ; }
 	double get_interpolation_delay_ms() const { return interpolation_delay_ticks * 1000.0 / PlanetNet::TICK_HZ; }
+
+	// Who this player is. Reconnecting with the same key restores the same entity where it was left.
+	// Empty: anonymous, not saved. Stand-in for accounts, which do not exist yet.
+	void set_player_key(const String &p_key) { player_key = p_key; }
+	String get_player_key() const { return player_key; }
 
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
