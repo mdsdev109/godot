@@ -36,9 +36,15 @@ core/math/planet_hash_noise.h    the noise
 core/math/planet_hash_noise_shader.h   its exact GLSL twin -- EDIT WITH THE FILE ABOVE
 
 scene/resources/3d/planet_{field,biome,shape}_3d.*   script-facing resources
+core/math/planet_det_math.h      sin/atan2/pow/... that give the same bits on every machine
 servers/physics_3d/              SHAPE_PLANET, plumbed through the server, dummy and wrap_mt
 modules/jolt_physics/shapes/     JoltPlanetShape3D and JoltCustomPlanetShape
+modules/planet_net/              the client/server layer: PlanetNetServer, PlanetNetClient over ENet
 ```
+
+The field must stay free of C runtime transcendentals -- use `planet_det_math.h` -- or Windows and
+Linux compute different terrain. See planet-demo's `docs/DETERMINISM.md`. The network layer's design
+is planet-demo's `docs/NETWORKING.md`.
 
 ## Building
 
