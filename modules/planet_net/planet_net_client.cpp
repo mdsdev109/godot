@@ -56,7 +56,10 @@ void PlanetNetClient::disconnect_from_server() {
 	clock_samples.clear();
 	next_clock_sample = 0;
 	ping_timer = 0.0;
-	snapshots.clear();
+	tracked.clear();
+	handles.clear();
+	newest_seq = 0;
+	ack_bits = 0;
 	recent_inputs.clear();
 	last_input_tick = 0;
 	if (was) {
@@ -184,6 +187,8 @@ void PlanetNetClient::_send_input() {
 
 	Writer w;
 	w.u8(MSG_INPUT);
+	w.u32(newest_seq);
+	w.u32(ack_bits);
 	w.u8(uint8_t(recent_inputs.size()));
 	for (const InputCommand &c : recent_inputs) {
 		w.u32(c.tick);
@@ -205,13 +210,16 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const uint16_t version = r.u16();
 			const uint16_t sid = r.u16();
 			const uint64_t entity = r.u64();
-			r.f64(); // the server's clock; the ping exchange measures it properly
+			const double region_radius = r.f64();
+			const uint32_t region_resolution = r.u32();
 			if (!r.ok() || version != PROTOCOL_VERSION) {
 				disconnect_from_server();
 				return;
 			}
 			server_id = sid;
 			local_entity = entity;
+			regions.radius = region_radius;
+			regions.resolution = region_resolution;
 			welcomed = true;
 			emit_signal(SNAME("connected"), int64_t(entity));
 		} break;
@@ -222,97 +230,161 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 				_on_pong(sent, server_ticks);
 			}
 		} break;
-		case MSG_SNAPSHOT: {
-			Snapshot snap;
-			snap.tick = r.u32();
-			const uint16_t n = r.u16();
-			snap.entities.resize(n);
-			for (uint16_t i = 0; i < n; ++i) {
-				snap.entities[i] = r.entity();
+		case MSG_SNAPSHOT:
+			if (welcomed) {
+				_on_snapshot(r);
 			}
-			if (!r.ok()) {
-				return;
-			}
-			// Unreliable delivery can reorder or repeat; keep the buffer sorted and unique by tick.
-			uint32_t at = snapshots.size();
-			while (at > 0 && snapshots[at - 1].tick > snap.tick) {
-				--at;
-			}
-			if (at > 0 && snapshots[at - 1].tick == snap.tick) {
-				return;
-			}
-			snapshots.insert(at, snap);
-			while (snapshots.size() > SNAPSHOT_BUFFER) {
-				snapshots.remove_at(0);
-			}
-		} break;
+			break;
 		default:
 			break;
 	}
 }
 
-bool PlanetNetClient::_find(const Snapshot &p_snapshot, uint64_t p_id, EntityState &r_state) const {
-	for (const EntityState &e : p_snapshot.entities) {
-		if (e.id == p_id) {
-			r_state = e;
-			return true;
+void PlanetNetClient::_mark_received(uint32_t p_seq) {
+	if (p_seq > newest_seq) {
+		const uint32_t shift = p_seq - newest_seq;
+		if (newest_seq == 0 || shift > 32) {
+			ack_bits = 0;
+		} else {
+			ack_bits = (shift == 32 ? 0u : ack_bits << shift) | (1u << (shift - 1));
+		}
+		newest_seq = p_seq;
+	} else if (p_seq < newest_seq && newest_seq - p_seq <= 32) {
+		ack_bits |= 1u << (newest_seq - p_seq - 1);
+	}
+}
+
+void PlanetNetClient::_on_snapshot(Reader &r_reader) {
+	const uint32_t seq = r_reader.u32();
+	const uint32_t tick = r_reader.u32();
+	const uint16_t n = r_reader.u16();
+	if (!r_reader.ok()) {
+		return;
+	}
+	bool complete = true;
+	for (uint16_t i = 0; i < n; ++i) {
+		const uint16_t handle = r_reader.u16();
+		const uint8_t flags = r_reader.u8();
+		uint64_t id = 0;
+		if (flags & RECORD_FULL) {
+			id = r_reader.u64();
+			handles[handle] = id;
+		} else {
+			const uint64_t *bound = handles.getptr(handle);
+			id = bound != nullptr ? *bound : 0;
+		}
+		Wire wire;
+		const Sample *base = nullptr;
+		Tracked *t = id != 0 ? tracked.getptr(id) : nullptr;
+		if (!(flags & RECORD_FULL)) {
+			const uint8_t age = r_reader.u8();
+			if (t != nullptr) {
+				for (const Sample &s : t->samples) {
+					if (s.tick == tick - age) {
+						base = &s;
+						break;
+					}
+				}
+			}
+			if (base != nullptr) {
+				wire = base->wire;
+			}
+		}
+		r_reader.record_fields(flags, wire);
+		if (!r_reader.ok()) {
+			return;
+		}
+		++records_received;
+		if (!(flags & RECORD_FULL) && base == nullptr) {
+			// The baseline is gone. Skip the record and do not acknowledge the snapshot, so the
+			// server never treats a state we do not have as our baseline.
+			++records_undecodable;
+			complete = false;
+			continue;
+		}
+		if (t == nullptr) {
+			t = &tracked.insert(id, Tracked())->value;
+		}
+		Sample s;
+		s.tick = tick;
+		s.wire = wire;
+		s.state = wire.decode(id, regions);
+		// In tick order; an equal tick replaces (a resend of the same state).
+		uint32_t at = t->samples.size();
+		while (at > 0 && t->samples[at - 1].tick > tick) {
+			--at;
+		}
+		if (at > 0 && t->samples[at - 1].tick == tick) {
+			t->samples[at - 1] = s;
+		} else {
+			t->samples.insert(at, s);
+		}
+		while (t->samples.size() > ENTITY_HISTORY) {
+			t->samples.remove_at(0);
 		}
 	}
-	return false;
+	const uint16_t m = r_reader.u16();
+	for (uint16_t i = 0; i < m; ++i) {
+		const uint16_t handle = r_reader.u16();
+		if (!r_reader.ok()) {
+			return;
+		}
+		const uint64_t *bound = handles.getptr(handle);
+		if (bound != nullptr) {
+			tracked.erase(*bound);
+			handles.erase(handle);
+		}
+	}
+	if (r_reader.ok() && complete) {
+		_mark_received(seq);
+	}
 }
 
 bool PlanetNetClient::_sample(uint64_t p_id, EntityState &r_state) const {
-	if (snapshots.is_empty()) {
+	const Tracked *t = tracked.getptr(p_id);
+	if (t == nullptr || t->samples.is_empty()) {
 		return false;
 	}
-	const double t = get_render_time();
-	// The pair of snapshots around the render time that both contain the entity.
-	for (int i = int(snapshots.size()) - 2; i >= 0; --i) {
-		const Snapshot &a = snapshots[i];
-		const Snapshot &b = snapshots[i + 1];
-		if (double(a.tick) <= t && t <= double(b.tick)) {
-			EntityState ea;
-			EntityState eb;
-			if (_find(a, p_id, ea) && _find(b, p_id, eb)) {
-				const double f = (t - double(a.tick)) / double(b.tick - a.tick);
-				r_state = eb;
-				r_state.position = ea.position.lerp(eb.position, f);
-				r_state.rotation = ea.rotation.slerp(eb.rotation, f);
-				return true;
-			}
-			break;
-		}
-	}
-	// Outside the buffer, or the entity is new: newest state that has it, extrapolated by its velocity
-	// for at most a quarter of a second past that snapshot, then held.
-	for (int i = int(snapshots.size()) - 1; i >= 0; --i) {
-		if (_find(snapshots[i], p_id, r_state)) {
-			const double ahead = CLAMP((t - double(snapshots[i].tick)) / TICK_HZ, 0.0, 0.25);
-			r_state.position += r_state.velocity * ahead;
+	const double time = get_render_time();
+	const LocalVector<Sample> &s = t->samples;
+	for (int i = int(s.size()) - 2; i >= 0; --i) {
+		if (double(s[i].tick) <= time && time <= double(s[i + 1].tick)) {
+			const double f = (time - double(s[i].tick)) / double(s[i + 1].tick - s[i].tick);
+			r_state = s[i + 1].state;
+			r_state.position = s[i].state.position.lerp(s[i + 1].state.position, f);
+			r_state.rotation = s[i].state.rotation.slerp(s[i + 1].state.rotation, f);
 			return true;
 		}
 	}
-	return false;
+	// Before the first state: hold it. After the last: extrapolate by velocity for at most a quarter
+	// second, then hold. Entities the server has not changed are simply not resent, so "after the
+	// last" is normal for anything standing still.
+	if (time < double(s[0].tick)) {
+		r_state = s[0].state;
+		return true;
+	}
+	r_state = s[s.size() - 1].state;
+	const double ahead = CLAMP((time - double(s[s.size() - 1].tick)) / TICK_HZ, 0.0, 0.25);
+	r_state.position += r_state.velocity * ahead;
+	return true;
 }
 
 PackedInt64Array PlanetNetClient::get_entity_ids() const {
 	PackedInt64Array ids;
-	if (!snapshots.is_empty()) {
-		for (const EntityState &e : snapshots[snapshots.size() - 1].entities) {
-			ids.push_back(int64_t(e.id));
-		}
+	for (const KeyValue<uint64_t, Tracked> &E : tracked) {
+		ids.push_back(int64_t(E.key));
 	}
 	return ids;
 }
 
-bool PlanetNetClient::has_entity(int64_t p_id) const {
-	EntityState e;
-	return !snapshots.is_empty() && _find(snapshots[snapshots.size() - 1], uint64_t(p_id), e);
+int PlanetNetClient::get_entity_type(int64_t p_id) const {
+	const Tracked *t = tracked.getptr(uint64_t(p_id));
+	return (t != nullptr && !t->samples.is_empty()) ? int(t->samples[t->samples.size() - 1].state.type) : 0;
 }
 
-int PlanetNetClient::get_entity_type(int64_t p_id) const {
-	EntityState e;
-	return (!snapshots.is_empty() && _find(snapshots[snapshots.size() - 1], uint64_t(p_id), e)) ? int(e.type) : 0;
+int PlanetNetClient::get_entity_update_tick(int64_t p_id) const {
+	const Tracked *t = tracked.getptr(uint64_t(p_id));
+	return (t != nullptr && !t->samples.is_empty()) ? int(t->samples[t->samples.size() - 1].tick) : -1;
 }
 
 Vector3 PlanetNetClient::get_entity_position(int64_t p_id) const {
@@ -330,8 +402,10 @@ Dictionary PlanetNetClient::get_stats() const {
 	d["connected"] = welcomed;
 	d["rtt_ms"] = get_rtt_ms();
 	d["server_time"] = server_time;
-	d["snapshots"] = snapshots.size();
-	d["newest_snapshot_tick"] = snapshots.is_empty() ? -1 : int64_t(snapshots[snapshots.size() - 1].tick);
+	d["entities"] = tracked.size();
+	d["newest_snapshot_seq"] = newest_seq;
+	d["records_received"] = records_received;
+	d["records_undecodable"] = records_undecodable;
 	d["bytes_sent"] = link.get_bytes_sent();
 	d["bytes_received"] = link.get_bytes_received();
 	return d;
@@ -354,6 +428,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_ids"), &PlanetNetClient::get_entity_ids);
 	ClassDB::bind_method(D_METHOD("has_entity", "id"), &PlanetNetClient::has_entity);
 	ClassDB::bind_method(D_METHOD("get_entity_type", "id"), &PlanetNetClient::get_entity_type);
+	ClassDB::bind_method(D_METHOD("get_entity_update_tick", "id"), &PlanetNetClient::get_entity_update_tick);
 	ClassDB::bind_method(D_METHOD("get_entity_position", "id"), &PlanetNetClient::get_entity_position);
 	ClassDB::bind_method(D_METHOD("get_entity_rotation", "id"), &PlanetNetClient::get_entity_rotation);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetClient::get_stats);

@@ -31,16 +31,18 @@
 #pragma once
 
 // The authoritative side: owns the ENet host, runs the fixed tick, simulates what clients control, and
-// sends snapshots. Headless; a script creates it and calls poll() every frame.
+// sends each client a snapshot of what is near it. Headless; a script creates it and calls poll().
 //
-// Milestone 1 of planet-demo's docs/NETWORKING.md: each client that says hello gets a player entity,
-// walked on the planet by its input, and every client receives every entity in full at SNAPSHOT_HZ.
-// Regions, interest and delta snapshots are milestone 2.
+// See planet-demo's docs/NETWORKING.md. Each client that says hello gets a player entity walked on the
+// planet by its input. Entities are indexed by region; each client is sent only the entities in regions
+// within its interest radius, most relevant first, up to a byte budget, as deltas against the last
+// state it acknowledged.
 
 #include "planet_net_link.h"
 #include "planet_net_protocol.h"
 
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_set.h"
 #include "scene/resources/3d/planet_field_3d.h"
 
 class PlanetNetServer : public RefCounted {
@@ -51,19 +53,55 @@ public:
 	static constexpr int ENTITY_TYPE_PLAYER = 1;
 	// Ticks of transform history kept per entity, for lag compensation and for the tests.
 	static constexpr int HISTORY_TICKS = 64;
+	// Snapshots remembered per client, to apply acknowledgements to.
+	static constexpr int SENT_RECORDS = 64;
 
 private:
+	// What one client has been told about one entity.
+	struct View {
+		bool has_baseline = false; // the client acknowledged a state we can delta against
+		uint32_t baseline_tick = 0;
+		PlanetNet::Wire baseline;
+		double priority = 0.0;
+		bool removing = false; // a removal is being sent until acknowledged
+		// Bumped whenever the entity leaves the client's interest. An acknowledgement only counts for
+		// the epoch its record was sent in: after a removal the client has dropped the old states.
+		uint32_t epoch = 0;
+		uint16_t handle = 0;
+	};
+
+	struct SentRecord {
+		uint32_t seq = 0;
+		uint32_t tick = 0;
+		bool valid = false;
+		LocalVector<uint64_t> ids;
+		LocalVector<PlanetNet::Wire> wires;
+		LocalVector<uint32_t> epochs;
+		LocalVector<uint64_t> removals;
+		LocalVector<uint16_t> removal_handles;
+		LocalVector<uint32_t> removal_epochs;
+	};
+
 	struct Client {
 		uint64_t entity = 0;
 		bool welcomed = false;
 		uint32_t input_tick = 0;
 		Vector2 move;
 		float yaw = 0.f;
+		HashMap<uint64_t, View> views;
+		SentRecord sent[SENT_RECORDS];
+		uint32_t last_acked_seq = 0;
+		uint64_t bytes_sent = 0;
+		uint32_t in_interest = 0;
+		LocalVector<uint16_t> free_handles;
+		uint32_t next_handle = 1;
 	};
 
 	struct Entity {
 		PlanetNet::EntityState state;
 		int owner_peer = 0;
+		uint32_t region = 0;
+		bool indexed = false;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -71,18 +109,30 @@ private:
 	PlanetNetLink link;
 	HashMap<int, Client> clients;
 	HashMap<uint64_t, Entity> entities;
+	HashMap<uint32_t, LocalVector<uint64_t>> region_index;
+	PlanetNet::Regions regions;
 	uint16_t server_id = 1;
 	uint64_t next_entity = 1;
 	uint32_t tick = 0;
+	uint32_t snapshot_seq = 0;
 	double accumulator = 0.0;
 	double planet_radius = 150000.0;
+	double region_size = 1000.0;
+	double interest_radius = 3000.0;
+	int client_budget = 32768; // bytes per second per client
+	bool delta_enabled = true;
 	double walk_speed = 5.0;
 	Ref<PlanetField3D> field;
 
 	Vector3 _surface_point(const Vector3 &p_dir) const;
+	void _configure_regions();
+	void _index(uint64_t p_id, Entity &r_entity);
+	void _unindex(uint64_t p_id, Entity &r_entity);
 	void _handle(int p_peer, const LocalVector<uint8_t> &p_data);
+	void _acknowledge(Client &r_client, uint32_t p_seq);
 	void _step();
-	void _send_snapshot();
+	void _interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const;
+	void _send_snapshot(int p_peer, Client &r_client);
 	void _record_history(Entity &r_entity);
 
 protected:
@@ -99,8 +149,16 @@ public:
 
 	void set_server_id(int p_id);
 	int get_server_id() const { return server_id; }
-	void set_planet_radius(double p_radius) { planet_radius = p_radius; }
+	void set_planet_radius(double p_radius);
 	double get_planet_radius() const { return planet_radius; }
+	void set_region_size(double p_size);
+	double get_region_size() const { return region_size; }
+	void set_interest_radius(double p_radius) { interest_radius = p_radius; }
+	double get_interest_radius() const { return interest_radius; }
+	void set_client_budget(int p_bytes_per_second) { client_budget = MAX(p_bytes_per_second, 1024); }
+	int get_client_budget() const { return client_budget; }
+	void set_delta_enabled(bool p_enabled) { delta_enabled = p_enabled; }
+	bool is_delta_enabled() const { return delta_enabled; }
 	void set_field(const Ref<PlanetField3D> &p_field) { field = p_field; }
 	Ref<PlanetField3D> get_field() const { return field; }
 	void set_walk_speed(double p_speed) { walk_speed = p_speed; }
@@ -116,14 +174,19 @@ public:
 	PackedInt64Array get_entity_ids() const;
 	Vector3 get_entity_position(int64_t p_id) const;
 	void set_entity_position(int64_t p_id, const Vector3 &p_position);
+	void set_entity_state(int64_t p_id, const Vector3 &p_position, const Quaternion &p_rotation, const Vector3 &p_velocity);
 	// Where the entity was at a (fractional) past tick, from the history ring. Returns the current
 	// position when the tick is outside what is kept.
 	Vector3 get_entity_position_at(int64_t p_id, double p_tick) const;
 	int get_entity_owner(int64_t p_id) const;
+	int get_region_of(const Vector3 &p_position) const { return int(regions.key_of(p_position)); }
 	int64_t get_client_entity(int p_peer) const;
 	PackedInt32Array get_client_peers() const;
+	// Entities the client is currently told about (not counting ones being removed).
+	PackedInt64Array get_client_view(int p_peer) const;
 
 	Dictionary get_stats() const;
+	Dictionary get_client_stats(int p_peer) const;
 
 	~PlanetNetServer() { stop(); }
 };

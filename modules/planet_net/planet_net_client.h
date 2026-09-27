@@ -31,10 +31,13 @@
 #pragma once
 
 // The client side: connects, keeps a synchronised copy of the server's clock, sends input every tick,
-// and shows each entity interpolated between snapshots at a fixed delay behind the server.
+// acknowledges snapshots, and shows each entity interpolated between its received states at a fixed
+// delay behind the server.
 //
-// Milestone 1 of planet-demo's docs/NETWORKING.md. The local player is interpolated like everything
-// else for now; prediction and reconciliation are milestone 3.
+// See planet-demo's docs/NETWORKING.md. The server sends only what is near, and only what changed
+// since a state this client acknowledged, so entities are tracked individually: each keeps the states
+// it arrived with, which are both its interpolation history and the baselines deltas refer to. The
+// local player is interpolated like everything else until milestone 3 adds prediction.
 
 #include "planet_net_link.h"
 #include "planet_net_protocol.h"
@@ -45,14 +48,20 @@ class PlanetNetClient : public RefCounted {
 	GDCLASS(PlanetNetClient, RefCounted);
 
 public:
-	static constexpr int SNAPSHOT_BUFFER = 32;
+	// States kept per entity. Must cover MAX_BASELINE_AGE ticks at the fastest update rate.
+	static constexpr int ENTITY_HISTORY = 64;
 	static constexpr int INPUT_REDUNDANCY = 4;
 	static constexpr int CLOCK_SAMPLES = 16;
 
 private:
-	struct Snapshot {
+	struct Sample {
 		uint32_t tick = 0;
-		LocalVector<PlanetNet::EntityState> entities;
+		PlanetNet::Wire wire;
+		PlanetNet::EntityState state;
+	};
+
+	struct Tracked {
+		LocalVector<Sample> samples; // oldest first
 	};
 
 	struct ClockSample {
@@ -72,6 +81,7 @@ private:
 	bool welcomed = false;
 	uint64_t local_entity = 0;
 	uint16_t server_id = 0;
+	PlanetNet::Regions regions;
 
 	// Seconds since connect_to_server(), advanced by poll().
 	double clock = 0.0;
@@ -85,18 +95,26 @@ private:
 	double last_rtt = 0.0;
 
 	double interpolation_delay_ticks = 3.0;
-	LocalVector<Snapshot> snapshots; // oldest first
+	HashMap<uint64_t, Tracked> tracked;
+	HashMap<uint16_t, uint64_t> handles; // bound by FULL records, released by removals
+	// Newest snapshot sequence decoded, and which of the 32 before it were: sent back with input.
+	uint32_t newest_seq = 0;
+	uint32_t ack_bits = 0;
+	uint64_t records_received = 0;
+	uint64_t records_undecodable = 0;
+
 	Vector2 input_move;
 	float input_yaw = 0.f;
 	uint32_t last_input_tick = 0;
 	LocalVector<InputCommand> recent_inputs;
 
 	void _handle(const LocalVector<uint8_t> &p_data);
+	void _on_snapshot(PlanetNet::Reader &r_reader);
+	void _mark_received(uint32_t p_seq);
 	void _on_pong(double p_sent_clock, double p_server_ticks);
 	void _update_clock(double p_delta);
 	void _send_ping();
 	void _send_input();
-	bool _find(const Snapshot &p_snapshot, uint64_t p_id, PlanetNet::EntityState &r_state) const;
 	bool _sample(uint64_t p_id, PlanetNet::EntityState &r_state) const;
 
 protected:
@@ -121,10 +139,13 @@ public:
 	void set_interpolation_delay_ms(double p_ms) { interpolation_delay_ticks = p_ms * 0.001 * PlanetNet::TICK_HZ; }
 	double get_interpolation_delay_ms() const { return interpolation_delay_ticks * 1000.0 / PlanetNet::TICK_HZ; }
 
-	// Entities in the newest snapshot.
+	// Entities the server has told us about and not yet removed.
 	PackedInt64Array get_entity_ids() const;
-	bool has_entity(int64_t p_id) const;
+	bool has_entity(int64_t p_id) const { return tracked.has(uint64_t(p_id)); }
 	int get_entity_type(int64_t p_id) const;
+	// Server tick of the newest state received for the entity, or -1. Entities that do not change are
+	// not resent, so for them this stays old by design.
+	int get_entity_update_tick(int64_t p_id) const;
 	// Interpolated at get_render_time().
 	Vector3 get_entity_position(int64_t p_id) const;
 	Quaternion get_entity_rotation(int64_t p_id) const;

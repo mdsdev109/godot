@@ -37,6 +37,7 @@ using namespace PlanetNet;
 
 Error PlanetNetServer::listen(int p_port, int p_max_clients) {
 	stop();
+	_configure_regions();
 	return link.listen(p_port, p_max_clients);
 }
 
@@ -44,7 +45,9 @@ void PlanetNetServer::stop() {
 	link.close();
 	clients.clear();
 	entities.clear();
+	region_index.clear();
 	tick = 0;
+	snapshot_seq = 0;
 	accumulator = 0.0;
 }
 
@@ -57,6 +60,49 @@ void PlanetNetServer::set_link_conditions(double p_latency_ms, double p_jitter_m
 void PlanetNetServer::set_server_id(int p_id) {
 	ERR_FAIL_COND_MSG(p_id < 1 || p_id > 0xffff, "Server id must be in [1, 65535].");
 	server_id = uint16_t(p_id);
+}
+
+void PlanetNetServer::set_planet_radius(double p_radius) {
+	planet_radius = p_radius;
+	_configure_regions();
+}
+
+void PlanetNetServer::set_region_size(double p_size) {
+	region_size = p_size;
+	_configure_regions();
+}
+
+void PlanetNetServer::_configure_regions() {
+	ERR_FAIL_COND_MSG(!clients.is_empty(), "Regions cannot change while clients are connected: they have been told the layout.");
+	regions.configure(planet_radius, region_size);
+	region_index.clear();
+	for (KeyValue<uint64_t, Entity> &E : entities) {
+		E.value.indexed = false;
+		_index(E.key, E.value);
+	}
+}
+
+void PlanetNetServer::_index(uint64_t p_id, Entity &r_entity) {
+	r_entity.region = regions.key_of(r_entity.state.position);
+	region_index[r_entity.region].push_back(p_id);
+	r_entity.indexed = true;
+}
+
+void PlanetNetServer::_unindex(uint64_t p_id, Entity &r_entity) {
+	if (!r_entity.indexed) {
+		return;
+	}
+	LocalVector<uint64_t> *ids = region_index.getptr(r_entity.region);
+	if (ids != nullptr) {
+		const int64_t at = ids->find(p_id);
+		if (at >= 0) {
+			ids->remove_at_unordered(uint32_t(at));
+		}
+		if (ids->is_empty()) {
+			region_index.erase(r_entity.region);
+		}
+	}
+	r_entity.indexed = false;
 }
 
 Vector3 PlanetNetServer::_surface_point(const Vector3 &p_dir) const {
@@ -75,10 +121,16 @@ int64_t PlanetNetServer::create_entity(int p_type, const Vector3 &p_position) {
 	}
 	const uint64_t id = e.state.id;
 	entities.insert(id, e);
+	_index(id, entities[id]);
 	return int64_t(id);
 }
 
 void PlanetNetServer::destroy_entity(int64_t p_id) {
+	Entity *e = entities.getptr(uint64_t(p_id));
+	if (e == nullptr) {
+		return;
+	}
+	_unindex(uint64_t(p_id), *e);
 	entities.erase(uint64_t(p_id));
 }
 
@@ -99,6 +151,14 @@ void PlanetNetServer::set_entity_position(int64_t p_id, const Vector3 &p_positio
 	Entity *e = entities.getptr(uint64_t(p_id));
 	ERR_FAIL_NULL(e);
 	e->state.position = p_position;
+}
+
+void PlanetNetServer::set_entity_state(int64_t p_id, const Vector3 &p_position, const Quaternion &p_rotation, const Vector3 &p_velocity) {
+	Entity *e = entities.getptr(uint64_t(p_id));
+	ERR_FAIL_NULL(e);
+	e->state.position = p_position;
+	e->state.rotation = p_rotation;
+	e->state.velocity = p_velocity;
 }
 
 Vector3 PlanetNetServer::get_entity_position_at(int64_t p_id, double p_tick) const {
@@ -138,6 +198,19 @@ PackedInt32Array PlanetNetServer::get_client_peers() const {
 	return peers;
 }
 
+PackedInt64Array PlanetNetServer::get_client_view(int p_peer) const {
+	PackedInt64Array ids;
+	const Client *c = clients.getptr(p_peer);
+	if (c != nullptr) {
+		for (const KeyValue<uint64_t, View> &V : c->views) {
+			if (!V.value.removing) {
+				ids.push_back(int64_t(V.key));
+			}
+		}
+	}
+	return ids;
+}
+
 void PlanetNetServer::_record_history(Entity &r_entity) {
 	const int i = int(tick % HISTORY_TICKS);
 	r_entity.history[i] = r_entity.state.position;
@@ -159,7 +232,7 @@ void PlanetNetServer::poll(double p_delta) {
 				const Client *c = clients.getptr(ev.peer);
 				if (c != nullptr) {
 					if (c->entity != 0) {
-						entities.erase(c->entity);
+						destroy_entity(int64_t(c->entity));
 					}
 					clients.erase(ev.peer);
 					emit_signal(SNAME("client_disconnected"), ev.peer);
@@ -210,7 +283,8 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			w.u16(PROTOCOL_VERSION);
 			w.u16(server_id);
 			w.u64(uint64_t(id));
-			w.f64(get_time_ticks());
+			w.f64(regions.radius);
+			w.u32(regions.resolution);
 			link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 			emit_signal(SNAME("client_connected"), p_peer, id);
 		} break;
@@ -226,7 +300,20 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			link.send(p_peer, CHANNEL_STATE, w.data(), false);
 		} break;
 		case MSG_INPUT: {
+			const uint32_t newest = r.u32();
+			const uint32_t bits = r.u32();
 			const uint8_t n = r.u8();
+			if (!r.ok()) {
+				return;
+			}
+			if (newest != 0) {
+				_acknowledge(*client, newest);
+				for (uint32_t k = 0; k < 32; ++k) {
+					if ((bits & (1u << k)) && newest > k + 1) {
+						_acknowledge(*client, newest - 1 - k);
+					}
+				}
+			}
 			// Redundant copies of recent input; only the newest one matters until milestone 3 applies
 			// them tick by tick.
 			for (uint8_t i = 0; i < n; ++i) {
@@ -244,6 +331,31 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 		default:
 			break;
 	}
+}
+
+void PlanetNetServer::_acknowledge(Client &r_client, uint32_t p_seq) {
+	SentRecord &rec = r_client.sent[p_seq % SENT_RECORDS];
+	if (!rec.valid || rec.seq != p_seq) {
+		return;
+	}
+	for (uint32_t k = 0; k < rec.ids.size(); ++k) {
+		View *view = r_client.views.getptr(rec.ids[k]);
+		if (view != nullptr && !view->removing && view->epoch == rec.epochs[k] &&
+				(!view->has_baseline || rec.tick > view->baseline_tick)) {
+			view->has_baseline = true;
+			view->baseline_tick = rec.tick;
+			view->baseline = rec.wires[k];
+		}
+	}
+	for (uint32_t k = 0; k < rec.removals.size(); ++k) {
+		View *view = r_client.views.getptr(rec.removals[k]);
+		if (view != nullptr && view->removing && view->epoch == rec.removal_epochs[k]) {
+			r_client.free_handles.push_back(view->handle);
+			r_client.views.erase(rec.removals[k]);
+		}
+	}
+	r_client.last_acked_seq = MAX(r_client.last_acked_seq, p_seq);
+	rec.valid = false;
 }
 
 void PlanetNetServer::_step() {
@@ -275,30 +387,172 @@ void PlanetNetServer::_step() {
 	}
 	for (KeyValue<uint64_t, Entity> &E : entities) {
 		_record_history(E.value);
+		const uint32_t key = regions.key_of(E.value.state.position);
+		if (!E.value.indexed || key != E.value.region) {
+			_unindex(E.key, E.value);
+			_index(E.key, E.value);
+		}
 	}
 	// SNAPSHOT_HZ out of TICK_HZ ticks carry a snapshot, spread evenly.
 	if ((uint64_t(tick) * SNAPSHOT_HZ) / TICK_HZ != (uint64_t(tick - 1) * SNAPSHOT_HZ) / TICK_HZ) {
-		_send_snapshot();
+		++snapshot_seq;
+		for (KeyValue<int, Client> &C : clients) {
+			if (C.value.welcomed) {
+				_send_snapshot(C.key, C.value);
+			}
+		}
 	}
 }
 
-void PlanetNetServer::_send_snapshot() {
+void PlanetNetServer::_interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const {
+	// Sample the tangent disk at half a region's spacing and collect the regions the samples land
+	// in. Works across cube faces with no special cases, because every sample is simply mapped.
+	const Vector3 up = p_centre.normalized();
+	Vector3 north = Vector3(0, 1, 0) - up * up.y;
+	if (north.length_squared() < 1e-12) {
+		north = Vector3(0, 0, -1) - up * up.z;
+	}
+	north.normalize();
+	const Vector3 east = north.cross(up);
+	const double step = regions.cell_size() * 0.5;
+	const double reach = interest_radius + regions.cell_size();
+	const int n = int(Math::ceil(reach / step));
+	const double limit = (reach / step) * (reach / step) + 1.0;
+	for (int a = -n; a <= n; ++a) {
+		for (int b = -n; b <= n; ++b) {
+			if (double(a * a + b * b) > limit) {
+				continue;
+			}
+			r_regions.insert(regions.key_of(p_centre + (east * double(a) + north * double(b)) * step));
+		}
+	}
+}
+
+void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
+	const Entity *self = r_client.entity != 0 ? entities.getptr(r_client.entity) : nullptr;
+	if (self == nullptr) {
+		return;
+	}
+	const Vector3 centre = self->state.position;
+
+	HashSet<uint32_t> interest;
+	_interest_regions(centre, interest);
+
+	struct Candidate {
+		uint64_t id = 0;
+		double priority = 0.0;
+		bool operator<(const Candidate &p_other) const { return priority > p_other.priority; }
+	};
+	LocalVector<Candidate> candidates;
+	HashSet<uint64_t> wanted;
+	for (const uint32_t key : interest) {
+		const LocalVector<uint64_t> *ids = region_index.getptr(key);
+		if (ids == nullptr) {
+			continue;
+		}
+		for (const uint64_t id : *ids) {
+			const Entity &e = entities[id];
+			wanted.insert(id);
+			View *view = r_client.views.getptr(id);
+			if (view == nullptr) {
+				uint16_t handle = 0;
+				if (!r_client.free_handles.is_empty()) {
+					handle = r_client.free_handles[r_client.free_handles.size() - 1];
+					r_client.free_handles.resize(r_client.free_handles.size() - 1);
+				} else if (r_client.next_handle <= 0xffff) {
+					handle = uint16_t(r_client.next_handle++);
+				} else {
+					continue; // 65535 entities in one client's view: the rest wait for a free handle
+				}
+				view = &r_client.views.insert(id, View())->value;
+				view->handle = handle;
+				view->priority = 1000.0; // new to this client: soon
+			} else if (view->removing) {
+				view->removing = false;
+				view->has_baseline = false;
+				view->priority += 1000.0;
+			}
+			// Everything gains priority every snapshot, near things much faster: the weight falls with
+			// the square of distance past 100 m, so on a tight budget what is close stays smooth, and the
+			// floor means nothing far starves. The client's own player always goes first.
+			const double distance = centre.distance_to(e.state.position);
+			const double nearness = 400.0 / (100.0 + distance);
+			view->priority += 0.3 + nearness * nearness;
+			if (id == r_client.entity) {
+				view->priority += 1e9;
+			}
+			Candidate c;
+			c.id = id;
+			c.priority = view->priority;
+			candidates.push_back(c);
+		}
+	}
+	r_client.in_interest = candidates.size();
+	candidates.sort();
+
+	SentRecord &rec = r_client.sent[snapshot_seq % SENT_RECORDS];
+	rec.seq = snapshot_seq;
+	rec.tick = tick;
+	rec.valid = true;
+	rec.ids.clear();
+	rec.wires.clear();
+	rec.epochs.clear();
+	rec.removals.clear();
+	rec.removal_handles.clear();
+	rec.removal_epochs.clear();
+
+	// Whatever left interest, or no longer exists, is removed until the client acknowledges it.
+	for (KeyValue<uint64_t, View> &V : r_client.views) {
+		if (!wanted.has(V.key) && !V.value.removing) {
+			V.value.removing = true;
+			V.value.has_baseline = false;
+			++V.value.epoch;
+		}
+		if (V.value.removing && rec.removals.size() < 512) {
+			rec.removals.push_back(V.key);
+			rec.removal_handles.push_back(V.value.handle);
+			rec.removal_epochs.push_back(V.value.epoch);
+		}
+	}
+
 	Writer w;
 	w.u8(MSG_SNAPSHOT);
+	w.u32(snapshot_seq);
 	w.u32(tick);
-	w.u16(uint16_t(MIN(entities.size(), uint32_t(0xffff))));
-	uint32_t written = 0;
-	for (const KeyValue<uint64_t, Entity> &E : entities) {
-		if (written++ >= 0xffff) {
+	const uint32_t count_at = w.size();
+	w.u16(0);
+	const uint32_t removal_bytes = 2 + 2 * rec.removals.size();
+	const uint32_t budget = uint32_t(client_budget / SNAPSHOT_HZ);
+	uint16_t written = 0;
+	for (const Candidate &c : candidates) {
+		View &view = r_client.views[c.id];
+		const Wire now = Wire::encode(entities[c.id].state, regions);
+		const bool usable = delta_enabled && view.has_baseline && tick - view.baseline_tick <= MAX_BASELINE_AGE;
+		const uint32_t before = w.size();
+		if (!w.record(view.handle, c.id, now, usable ? &view.baseline : nullptr, uint8_t(usable ? tick - view.baseline_tick : 0))) {
+			view.priority = 0.0; // unchanged since the client's baseline: nothing to send
+			continue;
+		}
+		if (w.size() + removal_bytes > budget && written > 0) {
+			w.truncate(before);
 			break;
 		}
-		w.entity(E.value.state);
-	}
-	for (const KeyValue<int, Client> &C : clients) {
-		if (C.value.welcomed) {
-			link.send(C.key, CHANNEL_STATE, w.data(), false);
+		view.priority = 0.0;
+		rec.ids.push_back(c.id);
+		rec.wires.push_back(now);
+		rec.epochs.push_back(view.epoch);
+		++written;
+		if (written == 0xffff) {
+			break;
 		}
 	}
+	w.patch_u16(count_at, written);
+	w.u16(uint16_t(rec.removal_handles.size()));
+	for (const uint16_t handle : rec.removal_handles) {
+		w.u16(handle);
+	}
+	r_client.bytes_sent += w.size();
+	link.send(p_peer, CHANNEL_STATE, w.data(), false);
 }
 
 Dictionary PlanetNetServer::get_stats() const {
@@ -306,8 +560,24 @@ Dictionary PlanetNetServer::get_stats() const {
 	d["tick"] = tick;
 	d["clients"] = clients.size();
 	d["entities"] = entities.size();
+	d["regions_occupied"] = region_index.size();
+	d["regions_per_face_edge"] = regions.resolution;
+	d["region_size_m"] = regions.cell_size();
 	d["bytes_sent"] = link.get_bytes_sent();
 	d["bytes_received"] = link.get_bytes_received();
+	return d;
+}
+
+Dictionary PlanetNetServer::get_client_stats(int p_peer) const {
+	Dictionary d;
+	const Client *c = clients.getptr(p_peer);
+	if (c == nullptr) {
+		return d;
+	}
+	d["snapshot_bytes_sent"] = c->bytes_sent;
+	d["in_interest"] = c->in_interest;
+	d["views"] = c->views.size();
+	d["last_acked_seq"] = c->last_acked_seq;
 	return d;
 }
 
@@ -323,12 +593,24 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_server_id"), &PlanetNetServer::get_server_id);
 	ClassDB::bind_method(D_METHOD("set_planet_radius", "radius"), &PlanetNetServer::set_planet_radius);
 	ClassDB::bind_method(D_METHOD("get_planet_radius"), &PlanetNetServer::get_planet_radius);
+	ClassDB::bind_method(D_METHOD("set_region_size", "size"), &PlanetNetServer::set_region_size);
+	ClassDB::bind_method(D_METHOD("get_region_size"), &PlanetNetServer::get_region_size);
+	ClassDB::bind_method(D_METHOD("set_interest_radius", "radius"), &PlanetNetServer::set_interest_radius);
+	ClassDB::bind_method(D_METHOD("get_interest_radius"), &PlanetNetServer::get_interest_radius);
+	ClassDB::bind_method(D_METHOD("set_client_budget", "bytes_per_second"), &PlanetNetServer::set_client_budget);
+	ClassDB::bind_method(D_METHOD("get_client_budget"), &PlanetNetServer::get_client_budget);
+	ClassDB::bind_method(D_METHOD("set_delta_enabled", "enabled"), &PlanetNetServer::set_delta_enabled);
+	ClassDB::bind_method(D_METHOD("is_delta_enabled"), &PlanetNetServer::is_delta_enabled);
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetNetServer::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetServer::get_field);
 	ClassDB::bind_method(D_METHOD("set_walk_speed", "speed"), &PlanetNetServer::set_walk_speed);
 	ClassDB::bind_method(D_METHOD("get_walk_speed"), &PlanetNetServer::get_walk_speed);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "server_id", PROPERTY_HINT_RANGE, "1,65535"), "set_server_id", "get_server_id");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "region_size", PROPERTY_HINT_NONE, "suffix:m"), "set_region_size", "get_region_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interest_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_interest_radius", "get_interest_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "client_budget", PROPERTY_HINT_NONE, "suffix:B/s"), "set_client_budget", "get_client_budget");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "delta_enabled"), "set_delta_enabled", "is_delta_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "walk_speed", PROPERTY_HINT_NONE, "suffix:m/s"), "set_walk_speed", "get_walk_speed");
 
@@ -340,11 +622,15 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_ids"), &PlanetNetServer::get_entity_ids);
 	ClassDB::bind_method(D_METHOD("get_entity_position", "id"), &PlanetNetServer::get_entity_position);
 	ClassDB::bind_method(D_METHOD("set_entity_position", "id", "position"), &PlanetNetServer::set_entity_position);
+	ClassDB::bind_method(D_METHOD("set_entity_state", "id", "position", "rotation", "velocity"), &PlanetNetServer::set_entity_state);
 	ClassDB::bind_method(D_METHOD("get_entity_position_at", "id", "tick"), &PlanetNetServer::get_entity_position_at);
 	ClassDB::bind_method(D_METHOD("get_entity_owner", "id"), &PlanetNetServer::get_entity_owner);
+	ClassDB::bind_method(D_METHOD("get_region_of", "position"), &PlanetNetServer::get_region_of);
 	ClassDB::bind_method(D_METHOD("get_client_entity", "peer"), &PlanetNetServer::get_client_entity);
 	ClassDB::bind_method(D_METHOD("get_client_peers"), &PlanetNetServer::get_client_peers);
+	ClassDB::bind_method(D_METHOD("get_client_view", "peer"), &PlanetNetServer::get_client_view);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetServer::get_stats);
+	ClassDB::bind_method(D_METHOD("get_client_stats", "peer"), &PlanetNetServer::get_client_stats);
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("client_disconnected", PropertyInfo(Variant::INT, "peer")));
