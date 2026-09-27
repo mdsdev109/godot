@@ -140,14 +140,26 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 	new_field.plateau_edge = data.get("plateau_edge", 0.08);
 	new_field.plateau_spread = data.get("plateau_spread", 1.6);
 	new_field.plateau_seed = uint32_t(int64_t(data.get("plateau_seed", 4099)));
+	new_field.landforms.major.period = data.get("landform_period", 8000.0);
+	new_field.landforms.major.height = data.get("landform_height", 0.0);
+	new_field.landforms.major.tier_step = data.get("landform_tier_step", 40.0);
+	new_field.landforms.major.density = float(double(data.get("landform_density", 0.7)));
+	new_field.landforms.major.seed = uint32_t(int64_t(data.get("landform_seed", 5101)));
+	new_field.landforms.minor.period = data.get("hill_period", 8000.0);
+	new_field.landforms.minor.height = data.get("hill_height", 0.0);
+	new_field.landforms.minor.tier_step = data.get("hill_tier_step", 40.0);
+	new_field.landforms.minor.density = float(double(data.get("hill_density", 0.7)));
+	new_field.landforms.minor.seed = uint32_t(int64_t(data.get("hill_seed", 5101)));
+	new_field.landforms.warp = data.get("landform_warp", 0.3);
+	new_field.landforms.riser = data.get("landform_riser", 0.12);
 	new_field.biomes.kernel_radius = float(double(data.get("biome_kernel_radius", 0.55)));
 	new_field.macro_map = PlanetMacroMapRegistry::get(uint64_t(int64_t(data.get("macro_map_id", 0))));
 
 	const PackedFloat64Array biome_data = data.get("biomes", PackedFloat64Array());
-	new_field.biomes.count = MIN(int(biome_data.size() / 11), PlanetBiomeTable::MAX_BIOMES);
+	new_field.biomes.count = MIN(int(biome_data.size() / 13), PlanetBiomeTable::MAX_BIOMES);
 	for (int i = 0; i < new_field.biomes.count; ++i) {
 		PlanetBiomeProfileData &e = new_field.biomes.entries[i];
-		const double *r = biome_data.ptr() + i * 11;
+		const double *r = biome_data.ptr() + i * 13;
 		e.anchor_temperature = float(r[0]);
 		e.anchor_moisture = float(r[1]);
 		e.base_elevation = float(r[2]);
@@ -159,6 +171,8 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 		e.shape.ridged = float(r[8]);
 		e.terrace_strength = float(r[9]);
 		e.plateau_strength = float(r[10]);
+		e.landform_strength = float(r[11]);
+		e.hill_strength = float(r[12]);
 	}
 
 	const int new_face = int(data.get("face", 0));

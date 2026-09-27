@@ -305,6 +305,89 @@ void PlanetField3D::set_plateau_seed(int p_v) {
 }
 int PlanetField3D::get_plateau_seed() const { return int(data.plateau_seed); }
 
+void PlanetField3D::set_landform_period(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 100.0 || p_v > 1e7, "PlanetField3D landform_period is out of range.");
+	data.landforms.major.period = decltype(data.landforms.major.period)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_period() const { return real_t(data.landforms.major.period); }
+
+void PlanetField3D::set_landform_height(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.0 || p_v > 1e5, "PlanetField3D landform_height is out of range.");
+	data.landforms.major.height = decltype(data.landforms.major.height)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_height() const { return real_t(data.landforms.major.height); }
+
+void PlanetField3D::set_landform_tier_step(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 1.0 || p_v > 1e4, "PlanetField3D landform_tier_step is out of range.");
+	data.landforms.major.tier_step = decltype(data.landforms.major.tier_step)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_tier_step() const { return real_t(data.landforms.major.tier_step); }
+
+void PlanetField3D::set_landform_density(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.0 || p_v > 1.0, "PlanetField3D landform_density is out of range.");
+	data.landforms.major.density = decltype(data.landforms.major.density)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_density() const { return real_t(data.landforms.major.density); }
+
+void PlanetField3D::set_hill_period(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 100.0 || p_v > 1e7, "PlanetField3D hill_period is out of range.");
+	data.landforms.minor.period = decltype(data.landforms.minor.period)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_hill_period() const { return real_t(data.landforms.minor.period); }
+
+void PlanetField3D::set_hill_height(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.0 || p_v > 1e5, "PlanetField3D hill_height is out of range.");
+	data.landforms.minor.height = decltype(data.landforms.minor.height)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_hill_height() const { return real_t(data.landforms.minor.height); }
+
+void PlanetField3D::set_hill_tier_step(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 1.0 || p_v > 1e4, "PlanetField3D hill_tier_step is out of range.");
+	data.landforms.minor.tier_step = decltype(data.landforms.minor.tier_step)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_hill_tier_step() const { return real_t(data.landforms.minor.tier_step); }
+
+void PlanetField3D::set_hill_density(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.0 || p_v > 1.0, "PlanetField3D hill_density is out of range.");
+	data.landforms.minor.density = decltype(data.landforms.minor.density)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_hill_density() const { return real_t(data.landforms.minor.density); }
+
+void PlanetField3D::set_landform_warp(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.0 || p_v > 0.6, "PlanetField3D landform_warp is out of range.");
+	data.landforms.warp = decltype(data.landforms.warp)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_warp() const { return real_t(data.landforms.warp); }
+
+void PlanetField3D::set_landform_riser(real_t p_v) {
+	ERR_FAIL_COND_MSG(p_v < 0.02 || p_v > 0.5, "PlanetField3D landform_riser is out of range.");
+	data.landforms.riser = decltype(data.landforms.riser)(p_v);
+	emit_changed();
+}
+real_t PlanetField3D::get_landform_riser() const { return real_t(data.landforms.riser); }
+
+void PlanetField3D::set_landform_seed(int p_v) {
+	data.landforms.major.seed = uint32_t(p_v);
+	emit_changed();
+}
+int PlanetField3D::get_landform_seed() const { return int(data.landforms.major.seed); }
+
+void PlanetField3D::set_hill_seed(int p_v) {
+	data.landforms.minor.seed = uint32_t(p_v);
+	emit_changed();
+}
+int PlanetField3D::get_hill_seed() const { return int(data.landforms.minor.seed); }
+
+
 Vector2 PlanetField3D::eval_unshelved_offset(const Vector3 &p_unit_dir) const {
 	Vector3 d = p_unit_dir;
 	if (d.is_zero_approx()) {
@@ -338,6 +421,8 @@ void PlanetField3D::use_default_biomes() {
 		profile->set_roughness(e.roughness);
 		profile->set_terrace_strength(e.terrace_strength);
 		profile->set_plateau_strength(e.plateau_strength);
+		profile->set_landform_strength(e.landform_strength);
+		profile->set_hill_strength(e.hill_strength);
 		profile->set_shape_standard(e.shape.standard);
 		profile->set_shape_billow(e.shape.billow);
 		profile->set_shape_ridged(e.shape.ridged);
@@ -536,6 +621,30 @@ void PlanetField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_plateau_spread"), &PlanetField3D::get_plateau_spread);
 	ClassDB::bind_method(D_METHOD("set_plateau_seed", "value"), &PlanetField3D::set_plateau_seed);
 	ClassDB::bind_method(D_METHOD("get_plateau_seed"), &PlanetField3D::get_plateau_seed);
+	ClassDB::bind_method(D_METHOD("set_landform_period", "value"), &PlanetField3D::set_landform_period);
+	ClassDB::bind_method(D_METHOD("get_landform_period"), &PlanetField3D::get_landform_period);
+	ClassDB::bind_method(D_METHOD("set_landform_height", "value"), &PlanetField3D::set_landform_height);
+	ClassDB::bind_method(D_METHOD("get_landform_height"), &PlanetField3D::get_landform_height);
+	ClassDB::bind_method(D_METHOD("set_landform_tier_step", "value"), &PlanetField3D::set_landform_tier_step);
+	ClassDB::bind_method(D_METHOD("get_landform_tier_step"), &PlanetField3D::get_landform_tier_step);
+	ClassDB::bind_method(D_METHOD("set_landform_density", "value"), &PlanetField3D::set_landform_density);
+	ClassDB::bind_method(D_METHOD("get_landform_density"), &PlanetField3D::get_landform_density);
+	ClassDB::bind_method(D_METHOD("set_hill_period", "value"), &PlanetField3D::set_hill_period);
+	ClassDB::bind_method(D_METHOD("get_hill_period"), &PlanetField3D::get_hill_period);
+	ClassDB::bind_method(D_METHOD("set_hill_height", "value"), &PlanetField3D::set_hill_height);
+	ClassDB::bind_method(D_METHOD("get_hill_height"), &PlanetField3D::get_hill_height);
+	ClassDB::bind_method(D_METHOD("set_hill_tier_step", "value"), &PlanetField3D::set_hill_tier_step);
+	ClassDB::bind_method(D_METHOD("get_hill_tier_step"), &PlanetField3D::get_hill_tier_step);
+	ClassDB::bind_method(D_METHOD("set_hill_density", "value"), &PlanetField3D::set_hill_density);
+	ClassDB::bind_method(D_METHOD("get_hill_density"), &PlanetField3D::get_hill_density);
+	ClassDB::bind_method(D_METHOD("set_landform_warp", "value"), &PlanetField3D::set_landform_warp);
+	ClassDB::bind_method(D_METHOD("get_landform_warp"), &PlanetField3D::get_landform_warp);
+	ClassDB::bind_method(D_METHOD("set_landform_riser", "value"), &PlanetField3D::set_landform_riser);
+	ClassDB::bind_method(D_METHOD("get_landform_riser"), &PlanetField3D::get_landform_riser);
+	ClassDB::bind_method(D_METHOD("set_landform_seed", "value"), &PlanetField3D::set_landform_seed);
+	ClassDB::bind_method(D_METHOD("get_landform_seed"), &PlanetField3D::get_landform_seed);
+	ClassDB::bind_method(D_METHOD("set_hill_seed", "value"), &PlanetField3D::set_hill_seed);
+	ClassDB::bind_method(D_METHOD("get_hill_seed"), &PlanetField3D::get_hill_seed);
 	ClassDB::bind_method(D_METHOD("set_biome_kernel_radius", "value"), &PlanetField3D::set_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("get_biome_kernel_radius"), &PlanetField3D::get_biome_kernel_radius);
 	ClassDB::bind_method(D_METHOD("use_default_biomes"), &PlanetField3D::use_default_biomes);
@@ -591,6 +700,20 @@ void PlanetField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_edge", PROPERTY_HINT_RANGE, "0.01,1,0.001"), "set_plateau_edge", "get_plateau_edge");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_spread", PROPERTY_HINT_RANGE, "0,8,0.01"), "set_plateau_spread", "get_plateau_spread");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "plateau_seed"), "set_plateau_seed", "get_plateau_seed");
+
+	ADD_GROUP("Landforms", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_period", PROPERTY_HINT_RANGE, "100,100000,1,or_greater,suffix:m"), "set_landform_period", "get_landform_period");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_height", PROPERTY_HINT_RANGE, "0,5000,0.1,or_greater,suffix:m"), "set_landform_height", "get_landform_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_tier_step", PROPERTY_HINT_RANGE, "1,500,0.1,or_greater,suffix:m"), "set_landform_tier_step", "get_landform_tier_step");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_density", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_landform_density", "get_landform_density");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hill_period", PROPERTY_HINT_RANGE, "100,100000,1,or_greater,suffix:m"), "set_hill_period", "get_hill_period");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hill_height", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_hill_height", "get_hill_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hill_tier_step", PROPERTY_HINT_RANGE, "1,500,0.1,or_greater,suffix:m"), "set_hill_tier_step", "get_hill_tier_step");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hill_density", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_hill_density", "get_hill_density");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_warp", PROPERTY_HINT_RANGE, "0,0.6,0.001"), "set_landform_warp", "get_landform_warp");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "landform_riser", PROPERTY_HINT_RANGE, "0.02,0.5,0.001"), "set_landform_riser", "get_landform_riser");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "landform_seed"), "set_landform_seed", "get_landform_seed");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "hill_seed"), "set_hill_seed", "get_hill_seed");
 
 
 	ADD_GROUP("Coasts", "coast_");

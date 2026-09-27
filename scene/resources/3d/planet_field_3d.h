@@ -102,6 +102,31 @@ public:
 	real_t get_plateau_spread() const;
 	void set_plateau_seed(int p_v);
 	int get_plateau_seed() const;
+
+	void set_landform_period(real_t p_v);
+	real_t get_landform_period() const;
+	void set_landform_height(real_t p_v);
+	real_t get_landform_height() const;
+	void set_landform_tier_step(real_t p_v);
+	real_t get_landform_tier_step() const;
+	void set_landform_density(real_t p_v);
+	real_t get_landform_density() const;
+	void set_hill_period(real_t p_v);
+	real_t get_hill_period() const;
+	void set_hill_height(real_t p_v);
+	real_t get_hill_height() const;
+	void set_hill_tier_step(real_t p_v);
+	real_t get_hill_tier_step() const;
+	void set_hill_density(real_t p_v);
+	real_t get_hill_density() const;
+	void set_landform_warp(real_t p_v);
+	real_t get_landform_warp() const;
+	void set_landform_riser(real_t p_v);
+	real_t get_landform_riser() const;
+	void set_landform_seed(int p_v);
+	int get_landform_seed() const;
+	void set_hill_seed(int p_v);
+	int get_hill_seed() const;
 	void set_biome_kernel_radius(real_t p_v);
 	real_t get_biome_kernel_radius() const;
 

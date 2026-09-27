@@ -481,6 +481,8 @@ struct PlanetBiomeProfileData {
 	float roughness = 0.5f; // fBm gain.
 	float terrace_strength = 0.f; // 0 is untouched terrain, 1 is fully shaped into global terraces.
 	float plateau_strength = 0.f; // 0 has no plateaus; 1 raises each plateau level by the full height.
+	float landform_strength = 0.f; // Scales the major landforms (ranges, massifs, volcanoes, mesas).
+	float hill_strength = 0.f; // Scales the minor landforms (hills, buttes, knolls).
 	PlanetHashNoise::ShapeMix shape;
 
 	// Which surface material this biome wears, on flat ground and on cliffs.
@@ -501,6 +503,8 @@ struct PlanetBlendedParams {
 	float roughness = 0.5f;
 	float terrace_strength = 0.f;
 	float plateau_strength = 0.f;
+	float landform_strength = 0.f;
+	float hill_strength = 0.f;
 	PlanetHashNoise::ShapeMix shape;
 };
 
@@ -568,6 +572,8 @@ struct PlanetBiomeTable {
 		float roughness = 0.f;
 		float terrace_strength = 0.f;
 		float plateau_strength = 0.f;
+		float landform_strength = 0.f;
+		float hill_strength = 0.f;
 		float w_std = 0.f;
 		float w_bil = 0.f;
 		float w_rid = 0.f;
@@ -582,6 +588,8 @@ struct PlanetBiomeTable {
 			roughness += entries[i].roughness * w;
 			terrace_strength += entries[i].terrace_strength * w;
 			plateau_strength += entries[i].plateau_strength * w;
+			landform_strength += entries[i].landform_strength * w;
+			hill_strength += entries[i].hill_strength * w;
 			w_std += entries[i].shape.standard * w;
 			w_bil += entries[i].shape.billow * w;
 			w_rid += entries[i].shape.ridged * w;
@@ -592,6 +600,8 @@ struct PlanetBiomeTable {
 		r_out.roughness = roughness;
 		r_out.terrace_strength = terrace_strength;
 		r_out.plateau_strength = plateau_strength;
+		r_out.landform_strength = landform_strength;
+		r_out.hill_strength = hill_strength;
 		r_out.shape.standard = w_std;
 		r_out.shape.billow = w_bil;
 		r_out.shape.ridged = w_rid;
@@ -601,6 +611,22 @@ struct PlanetBiomeTable {
 		float result = 0.f;
 		for (int i = 0; i < count; ++i) {
 			result = result > entries[i].plateau_strength ? result : entries[i].plateau_strength;
+		}
+		return result;
+	}
+
+	float max_landform_strength() const {
+		float result = 0.f;
+		for (int i = 0; i < count; ++i) {
+			result = result > entries[i].landform_strength ? result : entries[i].landform_strength;
+		}
+		return result;
+	}
+
+	float max_hill_strength() const {
+		float result = 0.f;
+		for (int i = 0; i < count; ++i) {
+			result = result > entries[i].hill_strength ? result : entries[i].hill_strength;
 		}
 		return result;
 	}

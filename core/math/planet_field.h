@@ -34,6 +34,7 @@
 #include "core/math/planet_biome.h"
 #include "core/math/planet_coast.h"
 #include "core/math/planet_hash_noise.h"
+#include "core/math/planet_landform.h"
 #include "core/math/vector3.h"
 
 #include <atomic>
@@ -331,13 +332,22 @@ struct PlanetFieldData {
 	double plateau_spread = 1.6;
 	uint32_t plateau_seed = 4099u;
 
+	// Landforms: discrete mountains, ranges, volcanoes and mesas on one cell grid, and hills, buttes and
+	// knolls on a finer one -- see planet_landform.h. Applied after the plateaus, scaled by the biome
+	// blend's landform and hill strengths. A layer with zero height is disabled.
+	PlanetLandforms landforms;
+
 	bool use_biomes() const { return macro_map != nullptr && macro_map->is_valid() && !biomes.is_empty(); }
 
 	// Resolves the per-point noise parameters from the macro map and biome table. One place, so the
 	// scalar and batched evaluators cannot drift apart.
 	void resolve_params(const Vector3 &p_unit_dir, PlanetHashNoise::FbmParams &r_fbm,
 			PlanetHashNoise::ShapeMix &r_shape, double &r_amplitude, double &r_base_offset,
-			float &r_terrace_strength, float &r_plateau_strength) const {
+			float &r_terrace_strength, float &r_plateau_strength, float *r_landform = nullptr) const {
+		if (r_landform) {
+			r_landform[0] = 0.f;
+			r_landform[1] = 0.f;
+		}
 		r_fbm = fbm;
 		r_shape = shape;
 		r_amplitude = amplitude;
@@ -374,6 +384,22 @@ struct PlanetFieldData {
 		r_fbm.gain = b.roughness;
 		r_terrace_strength = b.terrace_strength;
 		r_plateau_strength = b.plateau_strength;
+		if (r_landform) {
+			r_landform[0] = b.landform_strength;
+			r_landform[1] = b.hill_strength;
+		}
+	}
+
+	// Height the landforms add at a point, given the blended landform and hill strengths.
+	double landform_offset(const Vector3 &p_unit_dir, const float *p_strength) const {
+		double result = 0.0;
+		if (p_strength[0] > 0.f && landforms.major.height > 0.0) {
+			result += double(p_strength[0]) * PlanetLandform::eval_layer(landforms, landforms.major, true, p_unit_dir, base_radius);
+		}
+		if (p_strength[1] > 0.f && landforms.minor.height > 0.0) {
+			result += double(p_strength[1]) * PlanetLandform::eval_layer(landforms, landforms.minor, false, p_unit_dir, base_radius);
+		}
+		return result;
 	}
 
 	// The plateau mask in 0..plateau_levels before shaping, from fixed-wavelength noise. Coordinates keep
@@ -471,6 +497,21 @@ struct PlanetFieldData {
 		if (plateau_height > 0.0 && plateau_levels > 0) {
 			r_max_offset += plateau_height * double(plateau_levels) * double(biomes.max_plateau_strength());
 		}
+		// Landforms raise the ground by at most their height, plus the smooth maximum's overshoot and one
+		// tier; the tiers can also dip a step below the smooth profile. The minor layer sums, so allow for
+		// overlapping features.
+		if (landforms.major.height > 0.0) {
+			const double s = double(biomes.max_landform_strength());
+			const double tier = PlanetLandform::max_tier(landforms.major, true);
+			r_max_offset += s * (landforms.major.height * 1.1 + tier);
+			r_min_offset -= s * tier;
+		}
+		if (landforms.minor.height > 0.0) {
+			const double s = double(biomes.max_hill_strength());
+			const double tier = PlanetLandform::max_tier(landforms.minor, false);
+			r_max_offset += 8.0 * s * (landforms.minor.height + tier);
+			r_min_offset -= 8.0 * s * tier;
+		}
 	}
 
 	double get_min_radius() const {
@@ -503,8 +544,10 @@ struct PlanetFieldData {
 	double eval_radius(const Vector3 &p_unit_dir) const {
 		float terrace_strength = 0.f;
 		float plateau_strength = 0.f;
-		const double unshelved = eval_unshelved_offset(p_unit_dir, terrace_strength, plateau_strength);
-		const double offset = apply_terracing(unshelved, terrace_strength) + plateau_offset(p_unit_dir, plateau_strength);
+		float landform_strength[2] = { 0.f, 0.f };
+		const double unshelved = eval_unshelved_offset(p_unit_dir, terrace_strength, plateau_strength, landform_strength);
+		const double offset = apply_terracing(unshelved, terrace_strength) + plateau_offset(p_unit_dir, plateau_strength)
+				+ landform_offset(p_unit_dir, landform_strength);
 		return apply_floor(base_radius + coast_offset(p_unit_dir, offset));
 	}
 
@@ -517,7 +560,8 @@ struct PlanetFieldData {
 	// terrace strength that applies there. This is what the shelves are cut from, so the level it
 	// sits in and how far through that level it is say exactly where every riser is -- which is how
 	// cliff geometry finds the edges it belongs on without searching the finished surface for walls.
-	double eval_unshelved_offset(const Vector3 &p_unit_dir, float &r_terrace_strength, float &r_plateau_strength) const {
+	double eval_unshelved_offset(const Vector3 &p_unit_dir, float &r_terrace_strength, float &r_plateau_strength,
+			float *r_landform = nullptr) const {
 		// Both the sample position and the final sum are computed in double. Doing either in float32
 		// quantizes the surface to the float32 ULP at this radius -- 0.25 m at 3,185,500 m -- which
 		// shows up as terraced terrain with metre-scale plateaus, not as a subtle rounding error.
@@ -525,7 +569,7 @@ struct PlanetFieldData {
 		PlanetHashNoise::ShapeMix local_shape;
 		double local_amplitude = 0.0;
 		double base_offset = 0.0;
-		resolve_params(p_unit_dir, local_fbm, local_shape, local_amplitude, base_offset, r_terrace_strength, r_plateau_strength);
+		resolve_params(p_unit_dir, local_fbm, local_shape, local_amplitude, base_offset, r_terrace_strength, r_plateau_strength, r_landform);
 
 		const double n = double(PlanetHashNoise::fbm_3d_shaped_precise(
 				p_unit_dir.x * base_radius, p_unit_dir.y * base_radius, p_unit_dir.z * base_radius,
@@ -569,13 +613,15 @@ struct PlanetFieldData {
 			double base_offset = 0.0;
 			float terrace_strength = 0.f;
 			float plateau_strength = 0.f;
-			resolve_params(p_dirs[i], local_fbm, local_shape, local_amplitude, base_offset, terrace_strength, plateau_strength);
+			float landform_strength[2] = { 0.f, 0.f };
+			resolve_params(p_dirs[i], local_fbm, local_shape, local_amplitude, base_offset, terrace_strength, plateau_strength,
+					landform_strength);
 
 			p_noise[i] = PlanetHashNoise::fbm_3d_shaped_precise(
 					p_scratch_x[i], p_scratch_y[i], p_scratch_z[i],
 					local_fbm, local_shape, warp, float(slope_erosion), float(local_amplitude));
 			const double offset = apply_terracing(base_offset + local_amplitude * double(p_noise[i]), terrace_strength)
-					+ plateau_offset(p_dirs[i], plateau_strength);
+					+ plateau_offset(p_dirs[i], plateau_strength) + landform_offset(p_dirs[i], landform_strength);
 			r_radius[i] = apply_floor(base_radius + coast_offset(p_dirs[i], offset));
 		}
 	}
@@ -662,6 +708,10 @@ struct PlanetFieldData {
 			result += double(biomes.max_plateau_strength()) * plateau_height * double(plateau_levels)
 					* 0.5 * plateau_spread * (1.5 / plateau_edge) * mask_gradient;
 		}
+		if (use_biomes()) {
+			result += double(biomes.max_landform_strength()) * PlanetLandform::layer_lipschitz(landforms, landforms.major, true);
+			result += double(biomes.max_hill_strength()) * PlanetLandform::layer_lipschitz(landforms, landforms.minor, false);
+		}
 		if (use_coast()) {
 			const double outline_slope = double(coast.noise_amplitude) * 2.24 * PERLIN_3D_LIPSCHITZ_PER_LATTICE_UNIT / double(coast.noise_period);
 			const double profile_slope = 2.0 + double(coast.cliff_height) / double(coast.cliff_width);
@@ -738,6 +788,11 @@ struct PlanetFieldData {
 	}
 };
 
+inline bool planet_landform_layer_equal(const PlanetLandformLayer &a, const PlanetLandformLayer &b) {
+	return a.period == b.period && a.height == b.height && a.tier_step == b.tier_step && a.density == b.density &&
+			a.seed == b.seed;
+}
+
 inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &b) {
 	if (!(a.coast == b.coast)) {
 		return false;
@@ -750,7 +805,10 @@ inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &
 			a.terrace_riser != b.terrace_riser || a.plateau_height != b.plateau_height ||
 			a.plateau_period != b.plateau_period || a.plateau_levels != b.plateau_levels ||
 			a.plateau_edge != b.plateau_edge || a.plateau_spread != b.plateau_spread ||
-			a.plateau_seed != b.plateau_seed) {
+			a.plateau_seed != b.plateau_seed ||
+			!planet_landform_layer_equal(a.landforms.major, b.landforms.major) ||
+			!planet_landform_layer_equal(a.landforms.minor, b.landforms.minor) ||
+			a.landforms.warp != b.landforms.warp || a.landforms.riser != b.landforms.riser) {
 		return false;
 	}
 	if (a.fbm.seed != b.fbm.seed || a.fbm.period != b.fbm.period || a.fbm.octaves != b.fbm.octaves ||
@@ -775,7 +833,8 @@ inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &
 				x.frequency_scale != y.frequency_scale || x.roughness != y.roughness ||
 				x.shape.standard != y.shape.standard || x.shape.billow != y.shape.billow ||
 				x.shape.ridged != y.shape.ridged || x.terrace_strength != y.terrace_strength ||
-				x.plateau_strength != y.plateau_strength) {
+				x.plateau_strength != y.plateau_strength || x.landform_strength != y.landform_strength ||
+				x.hill_strength != y.hill_strength) {
 			return false;
 		}
 	}

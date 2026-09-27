@@ -143,6 +143,18 @@ void PlanetShape3D::_update_shape() {
 	data["plateau_edge"] = fd.plateau_edge;
 	data["plateau_spread"] = fd.plateau_spread;
 	data["plateau_seed"] = int64_t(fd.plateau_seed);
+	data["landform_period"] = fd.landforms.major.period;
+	data["landform_height"] = fd.landforms.major.height;
+	data["landform_tier_step"] = fd.landforms.major.tier_step;
+	data["landform_density"] = fd.landforms.major.density;
+	data["landform_seed"] = int64_t(fd.landforms.major.seed);
+	data["hill_period"] = fd.landforms.minor.period;
+	data["hill_height"] = fd.landforms.minor.height;
+	data["hill_tier_step"] = fd.landforms.minor.tier_step;
+	data["hill_density"] = fd.landforms.minor.density;
+	data["hill_seed"] = int64_t(fd.landforms.minor.seed);
+	data["landform_warp"] = fd.landforms.warp;
+	data["landform_riser"] = fd.landforms.riser;
 	data["biome_kernel_radius"] = fd.biomes.kernel_radius;
 
 	// The map itself travels by registry id; a Variant cannot carry the map, and copying it per patch
@@ -150,13 +162,13 @@ void PlanetShape3D::_update_shape() {
 	Ref<PlanetMacroMap3D> map = field->get_macro_map();
 	data["macro_map_id"] = map.is_valid() ? map->get_registry_id() : int64_t(0);
 
-	// Ten floats per biome, flat, because a Variant array of dictionaries would allocate on every
+	// Thirteen floats per biome, flat, because a Variant array of dictionaries would allocate on every
 	// shape update and there are dozens of patches.
 	PackedFloat64Array biome_data;
-	biome_data.resize(fd.biomes.count * 11);
+	biome_data.resize(fd.biomes.count * 13);
 	for (int i = 0; i < fd.biomes.count; ++i) {
 		const PlanetBiomeProfileData &e = fd.biomes.entries[i];
-		double *w = biome_data.ptrw() + i * 11;
+		double *w = biome_data.ptrw() + i * 13;
 		w[0] = e.anchor_temperature;
 		w[1] = e.anchor_moisture;
 		w[2] = e.base_elevation;
@@ -168,6 +180,8 @@ void PlanetShape3D::_update_shape() {
 		w[8] = e.shape.ridged;
 		w[9] = e.terrace_strength;
 		w[10] = e.plateau_strength;
+		w[11] = e.landform_strength;
+		w[12] = e.hill_strength;
 	}
 	data["biomes"] = biome_data;
 
