@@ -372,6 +372,7 @@
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/3d/separation_ray_shape_3d.h"
 #include "scene/resources/3d/planet_biome_3d.h"
+#include "scene/resources/3d/planet_cliff_skin_3d.h"
 #include "scene/resources/3d/planet_field_3d.h"
 #include "scene/resources/3d/planet_shape_3d.h"
 #include "scene/resources/3d/sphere_shape_3d.h"
@@ -917,6 +918,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(PlanetMacroMap3D);
 	GDREGISTER_CLASS(PlanetField3D);
 	GDREGISTER_CLASS(PlanetShape3D);
+	GDREGISTER_CLASS(PlanetCliffSkin3D);
 	GDREGISTER_CLASS(SphereShape3D);
 	GDREGISTER_CLASS(BoxShape3D);
 	GDREGISTER_CLASS(CapsuleShape3D);
