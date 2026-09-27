@@ -2,6 +2,7 @@
 // Copyright (c) 2014-present Godot Engine contributors. SPDX-License-Identifier: MIT
 #pragma once
 
+#include "core/math/planet_det_math.h"
 #include "core/math/planet_hash_noise.h"
 #include "core/math/vector3.h"
 
@@ -36,7 +37,7 @@ struct PlanetCoastParams {
 	float profile(float control, float character) const {
 		const float beach = 1.f - smooth(0.2f, 0.55f, character);
 		const float cliff = smooth(0.48f, 0.8f, character);
-		const float shoulder = 0.75f * control * std::exp(-std::abs(control) / 35.f);
+		const float shoulder = 0.75f * control * float(PlanetDetMath::exp(double(-std::abs(control) / 35.f)));
 		const float wall = control / std::sqrt(control * control + cliff_width * cliff_width);
 		return control - beach * shoulder + cliff * cliff_height * wall;
 	}

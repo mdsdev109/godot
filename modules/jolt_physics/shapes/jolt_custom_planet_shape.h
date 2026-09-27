@@ -458,7 +458,7 @@ bool JoltCustomPlanetShape::march_ray_cells(JPH::Vec3Arg p_origin, JPH::Vec3Arg 
 
 	// How far the direction sweeps decides the step count; the length of the ray does not.
 	const double cos_sweep = CLAMP(p_enter.normalized().dot(p_exit.normalized()), -1.0, 1.0);
-	const double sweep = Math::acos(cos_sweep);
+	const double sweep = PlanetDetMath::acos(cos_sweep);
 	const double cell_angle = 2.0 / double(lattice.resolution);
 
 	uint32_t steps = 1;

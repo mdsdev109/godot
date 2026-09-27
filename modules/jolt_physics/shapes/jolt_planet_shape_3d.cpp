@@ -61,7 +61,7 @@ JPH::ShapeRefC JoltPlanetShape3D::_build() const {
 	// Tight radius bounds for this patch rather than the global ones. This is the min/max bound the
 	// design calls a pyramid, evaluated once at build time instead of stored as a tree.
 	const Vector3 corner_dir = lattice.vertex_direction(face, shape_settings.cell_min_i, shape_settings.cell_min_j);
-	const double half_angle = Math::acos(CLAMP(centre_dir.dot(corner_dir), -1.0, 1.0));
+	const double half_angle = PlanetDetMath::acos(CLAMP(centre_dir.dot(corner_dir), -1.0, 1.0));
 	double patch_min = 0.0;
 	double patch_max = 0.0;
 	field.get_bounds_for_cone(centre_dir, half_angle, patch_min, patch_max);

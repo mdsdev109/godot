@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/planet_det_math.h"
 #include "core/math/planet_hash_noise.h"
 #include "core/math/vector3.h"
 
@@ -256,9 +257,9 @@ inline double profile(const Feature &f, const double s) {
 			return q * q;
 		}
 		case VOLCANO:
-			return Math::pow(1.0 - s, double(f.power)) - 0.22 * (1.0 - Math::smoothstep(0.0, 0.18, s));
+			return PlanetDetMath::pow(1.0 - s, double(f.power)) - 0.22 * (1.0 - Math::smoothstep(0.0, 0.18, s));
 		default:
-			return Math::pow(1.0 - s, double(f.power));
+			return PlanetDetMath::pow(1.0 - s, double(f.power));
 	}
 }
 
@@ -296,9 +297,9 @@ inline double feature_height(const Feature &f, const Vector3 &p_feature_dir, con
 	if (r >= R * (1.0 + p_warp)) {
 		return 0.0;
 	}
-	const double theta = Math::atan2(b, ae);
-	const double lobes = 1.0 + p_warp * (0.55 * Math::sin(2.0 * theta + double(f.lobe_phase[0]))
-			+ 0.3 * Math::sin(3.0 * theta + double(f.lobe_phase[1])) + 0.15 * Math::sin(5.0 * theta + double(f.lobe_phase[2])));
+	const double theta = PlanetDetMath::atan2(b, ae);
+	const double lobes = 1.0 + p_warp * (0.55 * PlanetDetMath::sin(2.0 * theta + double(f.lobe_phase[0]))
+			+ 0.3 * PlanetDetMath::sin(3.0 * theta + double(f.lobe_phase[1])) + 0.15 * PlanetDetMath::sin(5.0 * theta + double(f.lobe_phase[2])));
 	const double s = r / (R * lobes);
 	if (s >= 1.0) {
 		return 0.0;
@@ -319,8 +320,8 @@ inline double feature_height(const Feature &f, const Vector3 &p_feature_dir, con
 	const double T = step_by_count > step_by_layer ? step_by_count : step_by_layer;
 	// The tier boundaries wobble rather than following the smooth contour, and the riser widens and
 	// narrows around the feature, so a band is a sheer wall on one side and a ramp on another.
-	const double turn = double(f.winding) * theta / Math::TAU + 0.25 * Math::sin(4.0 * theta + 6.0 * s + double(f.shift_phase));
-	const double rho = CLAMP(double(f.riser) + 0.3 * Math::sin(3.0 * theta + double(f.phase)), p_riser_min, 0.95);
+	const double turn = double(f.winding) * theta / Math::TAU + 0.25 * PlanetDetMath::sin(4.0 * theta + 6.0 * s + double(f.shift_phase));
+	const double rho = CLAMP(double(f.riser) + 0.3 * PlanetDetMath::sin(3.0 * theta + double(f.phase)), p_riser_min, 0.95);
 	const double q = y / T + turn;
 	const double level = Math::floor(q);
 	const double ph = q - level;
@@ -329,8 +330,8 @@ inline double feature_height(const Feature &f, const Vector3 &p_feature_dir, con
 	const double tiered = T * (level + eased) - T * turn;
 	// Segments: whole sectors of a band fade to a plain slope, so the bands break up instead of
 	// ringing the mountain.
-	const double seg = Math::smoothstep(0.0, 0.45, 0.6 * Math::sin(2.0 * theta + double(f.phase2))
-			+ 0.4 * Math::sin(5.0 * theta + 3.0 * s + double(f.seg_phase)));
+	const double seg = Math::smoothstep(0.0, 0.45, 0.6 * PlanetDetMath::sin(2.0 * theta + double(f.phase2))
+			+ 0.4 * PlanetDetMath::sin(5.0 * theta + 3.0 * s + double(f.seg_phase)));
 	const double k = fade * (0.1 + 0.9 * seg);
 	return y + k * (tiered - y);
 }

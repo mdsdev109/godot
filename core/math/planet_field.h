@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/planet_det_math.h"
 #include "core/math/math_funcs.h"
 #include "core/math/planet_biome.h"
 #include "core/math/planet_coast.h"
@@ -242,13 +243,13 @@ struct PlanetFieldData {
 
 		for (int k = 0; k < COAST_SEARCH_RAYS; ++k) {
 			const double az = (Math::TAU * double(k)) / double(COAST_SEARCH_RAYS);
-			const Vector3 t = u * Math::cos(az) + v * Math::sin(az);
+			const Vector3 t = u * PlanetDetMath::cos(az) + v * PlanetDetMath::sin(az);
 			// Start where the centre sample already certifies clear ground, and stop at whatever the
 			// rays before this one already found -- later rays get cheaper as the answer tightens.
 			double s = certified;
 			while (s < nearest) {
 				const double a = s / sea_level_radius;
-				const Vector3 d = (p_unit_dir * Math::cos(a) + t * Math::sin(a)).normalized();
+				const Vector3 d = (p_unit_dir * PlanetDetMath::cos(a) + t * PlanetDetMath::sin(a)).normalized();
 				const double h = eval_radius(d) - sea_level_radius;
 				if (h <= 0.0) {
 					nearest = s;
@@ -759,7 +760,7 @@ struct PlanetFieldData {
 		constexpr int RINGS = 4;
 		constexpr int SPOKES = 8;
 
-		const double tan_half = Math::tan(p_cone_half_angle);
+		const double tan_half = PlanetDetMath::tan(p_cone_half_angle);
 
 		double sampled_min = eval_radius(axis);
 		double sampled_max = sampled_min;
@@ -768,7 +769,7 @@ struct PlanetFieldData {
 			const double t = tan_half * (double(ring) / double(RINGS));
 			for (int spoke = 0; spoke < SPOKES; ++spoke) {
 				const double a = (Math::TAU * double(spoke)) / double(SPOKES);
-				const Vector3 dir = (axis + u * (t * Math::cos(a)) + v * (t * Math::sin(a))).normalized();
+				const Vector3 dir = (axis + u * (t * PlanetDetMath::cos(a)) + v * (t * PlanetDetMath::sin(a))).normalized();
 				const double r = eval_radius(dir);
 				sampled_min = MIN(sampled_min, r);
 				sampled_max = MAX(sampled_max, r);

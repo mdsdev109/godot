@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/planet_det_math.h"
 #include "core/math/math_funcs.h"
 #include "core/math/vector3.h"
 
@@ -154,11 +155,11 @@ struct PlanetLattice {
 	// distortion down to about 1.35x. Cost is a tan per axis per vertex, a couple of percent against
 	// thirteen octaves of noise.
 	static double face_warp(double p_linear) {
-		return Math::tan(p_linear * (Math::PI / 4.0));
+		return PlanetDetMath::tan(p_linear * (Math::PI / 4.0));
 	}
 
 	static double face_unwarp(double p_warped) {
-		return Math::atan(p_warped) * (4.0 / Math::PI);
+		return PlanetDetMath::atan(p_warped) * (4.0 / Math::PI);
 	}
 
 	// Direction of lattice vertex (face, i, j), with i and j in [0, resolution].

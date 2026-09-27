@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/math/planet_det_math.h"
 #include "core/math/planet_hash_noise.h"
 #include "core/math/vector3.h"
 
@@ -344,7 +345,7 @@ struct PlanetMacroMapData {
 					s.weirdness = 0.5f * (PlanetHashNoise::fbm_3d_precise(px, py, pz, w_fbm) + 1.f);
 
 					// Polar map: 1 at the equator, 0 at the poles, shaped by the falloff exponent.
-					const float polar = 1.f - float(Math::pow(Math::abs(d.y), double(p_params.polar_falloff)));
+					const float polar = 1.f - float(PlanetDetMath::pow(Math::abs(d.y), double(p_params.polar_falloff)));
 					const float t_noise = 0.5f * (PlanetHashNoise::fbm_3d_precise(px, py, pz, t_fbm) + 1.f);
 					float temp = p_params.polar_weight * polar + (1.f - p_params.polar_weight) * t_noise;
 					// Elevation still cools, and still does so before normalization, so the lapse rate

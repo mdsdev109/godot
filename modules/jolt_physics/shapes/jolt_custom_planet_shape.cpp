@@ -255,7 +255,7 @@ JPH::AABox JoltCustomPlanetShape::GetLocalBounds() const {
 	// samples, which is the largest such bulge.
 	const Vector3 c0 = lattice.vertex_direction(face, is[0], js[0]);
 	const Vector3 c1 = lattice.vertex_direction(face, is[1], js[1]);
-	const double half_angle = 0.5 * Math::acos(CLAMP(c0.dot(c1), -1.0, 1.0));
+	const double half_angle = 0.5 * PlanetDetMath::acos(CLAMP(c0.dot(c1), -1.0, 1.0));
 	const float sagitta = float(double(patch_max_radius) * (1.0 - Math::cos(half_angle)));
 	const JPH::Vec3 pad = JPH::Vec3::sReplicate(sagitta + 1.0f);
 
