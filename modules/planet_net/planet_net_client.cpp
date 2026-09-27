@@ -589,6 +589,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_predicted_tick"), &PlanetNetClient::get_predicted_tick);
 	ClassDB::bind_method(D_METHOD("get_predicted_position"), &PlanetNetClient::get_predicted_position);
 	ClassDB::bind_method(D_METHOD("get_predicted_rotation"), &PlanetNetClient::get_predicted_rotation);
+	ClassDB::bind_method(D_METHOD("get_predicted_reference"), &PlanetNetClient::get_predicted_reference);
 	ClassDB::bind_method(D_METHOD("get_predicted_position_at", "tick"), &PlanetNetClient::get_predicted_position_at);
 	ClassDB::bind_method(D_METHOD("get_prediction_stats"), &PlanetNetClient::get_prediction_stats);
 	ClassDB::bind_method(D_METHOD("get_predicted_frame", "tick"), &PlanetNetClient::get_predicted_frame);

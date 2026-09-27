@@ -84,6 +84,11 @@ void PlanetNetServer::set_server_id(int p_id) {
 	server_id = uint16_t(p_id);
 }
 
+void PlanetNetServer::set_spawn_direction(const Vector3 &p_direction) {
+	ERR_FAIL_COND_MSG(p_direction.length_squared() < 1e-12, "Spawn direction must not be zero.");
+	spawn_direction = p_direction.normalized();
+}
+
 void PlanetNetServer::set_planet_radius(double p_radius) {
 	planet_radius = p_radius;
 	walker.radius = p_radius;
@@ -328,9 +333,12 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				e.state.rotation = known->state.rotation;
 				e.state.velocity = known->state.velocity;
 			} else {
-				// New players start near the +Y pole, spread out so they do not stack.
-				const double spread = 20.0 / planet_radius;
-				const Vector3 dir = Vector3(spread * double(p_peer % 8), 1.0, spread * double(p_peer / 8)).normalized();
+				// New players start at the spawn point, spread out so they do not stack.
+				const Vector3 up = spawn_direction;
+				const Vector3 east = PlanetNet::Walker::local_north(up).cross(up);
+				const Vector3 north = up.cross(east);
+				const double spread = 3.0 / planet_radius;
+				const Vector3 dir = (up + east * (spread * double(p_peer % 8)) + north * (spread * double(p_peer / 8))).normalized();
 				id = create_entity(ENTITY_TYPE_PLAYER, walker.surface_point(dir));
 				if (!key.is_empty()) {
 					PlayerRecord rec;
@@ -1013,6 +1021,9 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetServer::get_field);
 	ClassDB::bind_method(D_METHOD("set_walk_speed", "speed"), &PlanetNetServer::set_walk_speed);
 	ClassDB::bind_method(D_METHOD("get_walk_speed"), &PlanetNetServer::get_walk_speed);
+	ClassDB::bind_method(D_METHOD("set_spawn_direction", "direction"), &PlanetNetServer::set_spawn_direction);
+	ClassDB::bind_method(D_METHOD("get_spawn_direction"), &PlanetNetServer::get_spawn_direction);
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "spawn_direction"), "set_spawn_direction", "get_spawn_direction");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "server_id", PROPERTY_HINT_RANGE, "1,65535"), "set_server_id", "get_server_id");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "region_size", PROPERTY_HINT_NONE, "suffix:m"), "set_region_size", "get_region_size");

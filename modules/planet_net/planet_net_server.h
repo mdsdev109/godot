@@ -141,6 +141,7 @@ private:
 	double accumulator = 0.0;
 	double planet_radius = 150000.0;
 	PlanetNet::Walker walker;
+	Vector3 spawn_direction = Vector3(0, 1, 0);
 	double region_size = 1000.0;
 	double interest_radius = 3000.0;
 	int client_budget = 32768; // bytes per second per client
@@ -196,6 +197,10 @@ public:
 	Ref<PlanetField3D> get_field() const { return walker.field; }
 	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
 	double get_walk_speed() const { return walker.speed; }
+	// Where new players appear (a direction from the planet's centre); they are spread a few metres
+	// apart around it so they do not stack.
+	void set_spawn_direction(const Vector3 &p_direction);
+	Vector3 get_spawn_direction() const { return spawn_direction; }
 
 	int get_tick() const { return int(tick); }
 	// The server's clock in ticks, including the fraction of the tick in progress.

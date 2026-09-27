@@ -178,6 +178,10 @@ public:
 	// The local player where it should be drawn: predicted, with corrections smoothed.
 	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
 	Quaternion get_predicted_rotation() const { return predicted.rotation; }
+	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game
+	// turns its camera heading into input yaw with this: atan2(heading . (reference x up), heading .
+	// reference).
+	Vector3 get_predicted_reference() const { return PlanetNet::Walker::transport(predicted.reference, predicted.position.normalized()); }
 	// The raw prediction for a tick still in the history, or Vector3() if it is not.
 	Vector3 get_predicted_position_at(int p_tick) const;
 	Dictionary get_prediction_stats() const;
