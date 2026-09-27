@@ -32,6 +32,7 @@
 
 #include "jolt_custom_shape_type.h"
 
+#include "core/math/planet_dig.h"
 #include "core/math/planet_field.h"
 #include "core/math/planet_lattice.h"
 
@@ -73,6 +74,7 @@
 class JoltCustomPlanetShapeSettings final : public JPH::ShapeSettings {
 public:
 	PlanetFieldData field;
+	LocalVector<PlanetFootprint> exclusions;
 	PlanetLattice lattice;
 
 	int face = 0;
@@ -95,6 +97,8 @@ public:
 class JoltCustomPlanetShape final : public JPH::Shape {
 public:
 	PlanetFieldData field;
+	// Dug footprints: cells whose centre falls in one produce no triangles (planet_dig.h).
+	LocalVector<PlanetFootprint> exclusions;
 	PlanetLattice lattice;
 
 	int face = 0;
@@ -116,6 +120,7 @@ public:
 	JoltCustomPlanetShape(const JoltCustomPlanetShapeSettings &p_settings, JPH::Shape::ShapeResult &p_result) :
 			JPH::Shape(JPH::EShapeType::User1, JoltCustomShapeSubType::PLANET, p_settings, p_result),
 			field(p_settings.field),
+			exclusions(p_settings.exclusions),
 			lattice(p_settings.lattice),
 			face(p_settings.face),
 			cell_min_i(p_settings.cell_min_i),
@@ -375,6 +380,23 @@ void JoltCustomPlanetShape::tessellate_cells(
 					const uint32_t k10 = k00 + 1;
 					const uint32_t k01 = k00 + verts_i;
 					const uint32_t k11 = k01 + 1;
+
+					// A dig site owns this ground: leave the cell out, so bodies reach the site's voxels.
+					// Its neighbours still classify their shared edges against it as before, which only
+					// matters for sliding along the hole's rim.
+					if (!exclusions.is_empty()) {
+						const Vector3 cell_centre = (dirs[k00] * radius[k00] + dirs[k11] * radius[k11]) * 0.5;
+						bool excluded = false;
+						for (const PlanetFootprint &fp : exclusions) {
+							if (fp.contains(cell_centre)) {
+								excluded = true;
+								break;
+							}
+						}
+						if (excluded) {
+							continue;
+						}
+					}
 
 					const JPH::Vec3 na = normal_a[c];
 					const JPH::Vec3 nb = normal_b[c];

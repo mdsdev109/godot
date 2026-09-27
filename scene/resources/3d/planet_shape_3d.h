@@ -63,6 +63,8 @@ class PlanetShape3D : public Shape3D {
 	int patch_i = 0;
 	int patch_j = 0;
 	int patches_per_axis = 1;
+	// Dug footprints this patch must not collide inside: see core/math/planet_dig.h.
+	PackedFloat64Array exclusions;
 
 	void _field_changed();
 
@@ -72,6 +74,11 @@ protected:
 	virtual void _update_shape() override;
 
 public:
+	// Footprints where a dig site's voxels have taken over, packed as planet_dig.h describes. Inside
+	// them the shape produces no triangles, so bodies fall through to the voxel collision.
+	void set_exclusions(const PackedFloat64Array &p_exclusions);
+	PackedFloat64Array get_exclusions() const { return exclusions; }
+
 	void set_field(const Ref<PlanetField3D> &p_field);
 	Ref<PlanetField3D> get_field() const;
 

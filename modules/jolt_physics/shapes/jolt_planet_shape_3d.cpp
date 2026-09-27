@@ -48,6 +48,7 @@ JPH::ShapeRefC JoltPlanetShape3D::_build() const {
 
 	JoltCustomPlanetShapeSettings shape_settings;
 	shape_settings.field = field;
+	shape_settings.exclusions = exclusions;
 	shape_settings.lattice = lattice;
 	shape_settings.face = face;
 	lattice.patch_cell_range(
@@ -194,12 +195,18 @@ void JoltPlanetShape3D::set_data(const Variant &p_data) {
 	PlanetLattice new_lattice;
 	new_lattice.resolution = res;
 
-	const bool unchanged = planet_field_equal(new_field, field) && new_face == face && new_pi == patch_i && new_pj == patch_j && new_per_axis == patches_per_axis && new_lattice.resolution == lattice.resolution;
+	LocalVector<PlanetFootprint> new_exclusions;
+	planet_footprints_unpack(data.get("exclusions", PackedFloat64Array()), new_exclusions);
+
+	// Footprints are compared too: like a field member missing from planet_field_equal(), a changed
+	// exclusion that does not count as a change would never reach the collider.
+	const bool unchanged = planet_field_equal(new_field, field) && planet_footprints_equal(new_exclusions, exclusions) && new_face == face && new_pi == patch_i && new_pj == patch_j && new_per_axis == patches_per_axis && new_lattice.resolution == lattice.resolution;
 	if (unchanged) {
 		return;
 	}
 
 	field = new_field;
+	exclusions = new_exclusions;
 	lattice = new_lattice;
 	face = new_face;
 	patch_i = new_pi;

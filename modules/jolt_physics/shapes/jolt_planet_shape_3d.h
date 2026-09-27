@@ -32,11 +32,13 @@
 
 #include "jolt_shape_3d.h"
 
+#include "core/math/planet_dig.h"
 #include "core/math/planet_field.h"
 #include "core/math/planet_lattice.h"
 
 class JoltPlanetShape3D final : public JoltShape3D {
 	PlanetFieldData field;
+	LocalVector<PlanetFootprint> exclusions;
 	PlanetLattice lattice;
 
 	// Which patch of the planet this shape covers. The owning body must sit at the matching patch

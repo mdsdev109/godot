@@ -93,6 +93,12 @@ real_t PlanetShape3D::get_enclosing_radius() const {
 	return field.is_valid() ? (field->get_max_radius() - field->get_min_radius()) : 0.0;
 }
 
+void PlanetShape3D::set_exclusions(const PackedFloat64Array &p_exclusions) {
+	exclusions = p_exclusions;
+	_update_shape();
+	emit_changed();
+}
+
 void PlanetShape3D::_update_shape() {
 	if (field.is_null()) {
 		// No field yet. Leave whatever the server has rather than pushing a degenerate shape.
@@ -189,6 +195,7 @@ void PlanetShape3D::_update_shape() {
 	data["patch_i"] = patch_i;
 	data["patch_j"] = patch_j;
 	data["patches_per_axis"] = patches_per_axis;
+	data["exclusions"] = exclusions;
 	PhysicsServer3D::get_singleton()->shape_set_data(get_shape(), data);
 	Shape3D::_update_shape();
 }
@@ -313,6 +320,9 @@ void PlanetShape3D::reset_collision_stats() {
 }
 
 void PlanetShape3D::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_exclusions", "exclusions"), &PlanetShape3D::set_exclusions);
+	ClassDB::bind_method(D_METHOD("get_exclusions"), &PlanetShape3D::get_exclusions);
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT64_ARRAY, "exclusions"), "set_exclusions", "get_exclusions");
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetShape3D::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetShape3D::get_field);
 
