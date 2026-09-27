@@ -60,8 +60,12 @@ void PlanetNetClient::disconnect_from_server() {
 	handles.clear();
 	newest_seq = 0;
 	ack_bits = 0;
-	recent_inputs.clear();
-	last_input_tick = 0;
+	last_ack_tick = 0;
+	predicting = false;
+	predicted_tick = 0;
+	frames.clear();
+	last_confirmed_tick = 0;
+	smoothing = Vector3();
 	if (was) {
 		emit_signal(SNAME("disconnected"));
 	}
@@ -74,8 +78,10 @@ void PlanetNetClient::set_link_conditions(double p_latency_ms, double p_jitter_m
 }
 
 void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw) {
-	input_move = p_move;
-	input_yaw = p_yaw;
+	// Predict with exactly what the server will receive. Inputs travel as float32 and a double build's
+	// Vector2 holds doubles, so an unrounded input predicts a different step on every tick it matters.
+	input.move = Vector2(float(p_move.x), float(p_move.y));
+	input.yaw = p_yaw;
 }
 
 void PlanetNetClient::poll(double p_delta) {
@@ -116,8 +122,136 @@ void PlanetNetClient::poll(double p_delta) {
 		_send_ping();
 	}
 	if (welcomed && clock_valid) {
+		_advance_prediction(p_delta);
 		_send_input();
 	}
+}
+
+void PlanetNetClient::_advance_prediction(double p_delta) {
+	// Corrections are shown as an offset that fades, not as a jump.
+	smoothing *= Math::exp(-p_delta / 0.1);
+	if (!predicting) {
+		return;
+	}
+	// Run ahead of the server by half a round trip plus a margin, so this tick's input is there
+	// before the server needs it.
+	const double target = server_time + 0.5 * last_rtt * TICK_HZ + prediction_lead_ticks;
+	int steps = 0;
+	while (double(predicted_tick) + 1.0 <= target && steps < 8) {
+		++predicted_tick;
+		++steps;
+		predicted = walker.step(predicted, input, 1.0 / TICK_HZ);
+		Frame f;
+		f.tick = predicted_tick;
+		f.input = input;
+		f.state = predicted;
+		frames.push_back(f);
+	}
+	while (frames.size() > PREDICTION_FRAMES) {
+		frames.remove_at(0);
+	}
+}
+
+void PlanetNetClient::_confirm(uint32_t p_tick, const Vector3 &p_position, const Vector3 &p_velocity) {
+	if (!predicting) {
+		// The first word from the server about our own player: predict from there.
+		predicting = true;
+		predicted_tick = p_tick;
+		predicted.position = p_position;
+		predicted.velocity = p_velocity;
+		frames.clear();
+		last_confirmed_tick = p_tick;
+		return;
+	}
+	if (p_tick <= last_confirmed_tick) {
+		return;
+	}
+	last_confirmed_tick = p_tick;
+	int at = -1;
+	for (int i = int(frames.size()) - 1; i >= 0; --i) {
+		if (frames[i].tick == p_tick) {
+			at = i;
+			break;
+		}
+	}
+	if (at < 0) {
+		// The server is past our prediction, or it fell out of the history: start again from its word.
+		if (p_tick >= predicted_tick || frames.is_empty() || p_tick < frames[0].tick) {
+			++prediction_resets;
+			smoothing += predicted.position - p_position;
+			predicted_tick = p_tick;
+			predicted.position = p_position;
+			predicted.velocity = p_velocity;
+			frames.clear();
+		}
+		return;
+	}
+	++prediction_compared;
+	const Vector3 mine = frames[at].state.position;
+	if (mine == p_position) {
+		++prediction_exact;
+		return;
+	}
+	// Mispredicted, almost always because the server did not have our input for some tick in time.
+	// Take its state and replay everything we have predicted since.
+	++prediction_corrections;
+	prediction_worst = MAX(prediction_worst, double(mine.distance_to(p_position)));
+	const Vector3 before = predicted.position;
+	WalkerState s;
+	s.position = p_position;
+	s.velocity = p_velocity;
+	s.rotation = frames[at].state.rotation;
+	frames[at].state = s;
+	for (uint32_t i = uint32_t(at) + 1; i < frames.size(); ++i) {
+		s = walker.step(s, frames[i].input, 1.0 / TICK_HZ);
+		frames[i].state = s;
+	}
+	predicted = s;
+	smoothing += before - predicted.position;
+}
+
+Vector3 PlanetNetClient::get_predicted_position_at(int p_tick) const {
+	for (int i = int(frames.size()) - 1; i >= 0; --i) {
+		if (frames[i].tick == uint32_t(p_tick)) {
+			return frames[i].state.position;
+		}
+	}
+	return Vector3();
+}
+
+Dictionary PlanetNetClient::get_predicted_frame(int p_tick) const {
+	Dictionary d;
+	for (int i = int(frames.size()) - 1; i >= 0; --i) {
+		if (frames[i].tick == uint32_t(p_tick)) {
+			d["tick"] = p_tick;
+			d["move"] = frames[i].input.move;
+			d["yaw"] = frames[i].input.yaw;
+			d["position"] = frames[i].state.position;
+			break;
+		}
+	}
+	return d;
+}
+
+void PlanetNetClient::reset_prediction_stats() {
+	prediction_compared = 0;
+	prediction_exact = 0;
+	prediction_corrections = 0;
+	prediction_resets = 0;
+	prediction_worst = 0.0;
+}
+
+Dictionary PlanetNetClient::get_prediction_stats() const {
+	Dictionary d;
+	d["predicting"] = predicting;
+	d["predicted_tick"] = predicted_tick;
+	d["compared"] = prediction_compared;
+	d["exact"] = prediction_exact;
+	d["corrections"] = prediction_corrections;
+	d["resets"] = prediction_resets;
+	d["worst_correction_m"] = prediction_worst;
+	d["smoothing_m"] = smoothing.length();
+	return d;
 }
 
 void PlanetNetClient::_send_ping() {
@@ -171,30 +305,24 @@ void PlanetNetClient::_update_clock(double p_delta) {
 }
 
 void PlanetNetClient::_send_input() {
-	const uint32_t now_tick = uint32_t(MAX(server_time, 0.0));
-	if (now_tick == last_input_tick && !recent_inputs.is_empty()) {
+	// Once per tick: the newest predicted inputs (repeated, so a lost packet costs nothing) and the
+	// snapshot acknowledgements. Before prediction starts there are no inputs, only acknowledgements.
+	const uint32_t now_tick = predicting ? predicted_tick : uint32_t(MAX(server_time, 0.0));
+	if (now_tick == last_ack_tick) {
 		return;
 	}
-	last_input_tick = now_tick;
-	InputCommand cmd;
-	cmd.tick = now_tick;
-	cmd.move = input_move;
-	cmd.yaw = input_yaw;
-	if (recent_inputs.size() >= INPUT_REDUNDANCY) {
-		recent_inputs.remove_at(0);
-	}
-	recent_inputs.push_back(cmd);
-
+	last_ack_tick = now_tick;
+	const uint32_t n = predicting ? MIN(frames.size(), uint32_t(INPUT_REDUNDANCY)) : 0;
 	Writer w;
 	w.u8(MSG_INPUT);
 	w.u32(newest_seq);
 	w.u32(ack_bits);
-	w.u8(uint8_t(recent_inputs.size()));
-	for (const InputCommand &c : recent_inputs) {
-		w.u32(c.tick);
-		w.f32(c.move.x);
-		w.f32(c.move.y);
-		w.f32(c.yaw);
+	w.u8(uint8_t(n));
+	for (uint32_t i = frames.size() - n; i < frames.size(); ++i) {
+		w.u32(frames[i].tick);
+		w.f32(frames[i].input.move.x);
+		w.f32(frames[i].input.move.y);
+		w.f32(frames[i].input.yaw);
 	}
 	link.send(server_peer, CHANNEL_STATE, w.data(), false);
 }
@@ -212,6 +340,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const uint64_t entity = r.u64();
 			const double region_radius = r.f64();
 			const uint32_t region_resolution = r.u32();
+			const double walk_speed = r.f64();
 			if (!r.ok() || version != PROTOCOL_VERSION) {
 				disconnect_from_server();
 				return;
@@ -220,6 +349,8 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			local_entity = entity;
 			regions.radius = region_radius;
 			regions.resolution = region_resolution;
+			walker.radius = region_radius;
+			walker.speed = walk_speed;
 			welcomed = true;
 			emit_signal(SNAME("connected"), int64_t(entity));
 		} break;
@@ -257,6 +388,27 @@ void PlanetNetClient::_mark_received(uint32_t p_seq) {
 void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 	const uint32_t seq = r_reader.u32();
 	const uint32_t tick = r_reader.u32();
+	const uint32_t applied = r_reader.u32();
+	if (applied != 0) {
+		Vector3 position;
+		Vector3 velocity;
+		position.x = r_reader.f64();
+		position.y = r_reader.f64();
+		position.z = r_reader.f64();
+		velocity.x = r_reader.f64();
+		velocity.y = r_reader.f64();
+		velocity.z = r_reader.f64();
+		if (r_reader.ok()) {
+			_confirm(applied, position, velocity);
+		}
+	} else if (r_reader.ok() && !predicting && local_entity != 0) {
+		// The server has no input from us yet. Start predicting from where it has us, so that inputs
+		// start flowing; its first applied tick then confirms or corrects.
+		const Tracked *self = tracked.getptr(local_entity);
+		if (self != nullptr && !self->samples.is_empty()) {
+			_confirm(tick, self->samples[self->samples.size() - 1].state.position, Vector3());
+		}
+	}
 	const uint16_t n = r_reader.u16();
 	if (!r_reader.ok()) {
 		return;
@@ -356,15 +508,16 @@ bool PlanetNetClient::_sample(uint64_t p_id, EntityState &r_state) const {
 			return true;
 		}
 	}
-	// Before the first state: hold it. After the last: extrapolate by velocity for at most a quarter
-	// second, then hold. Entities the server has not changed are simply not resent, so "after the
-	// last" is normal for anything standing still.
+	// Before the first state: hold it. After the last: extrapolate by velocity for at most half a
+	// second, then hold. Entities the server has not changed are simply not resent, so "after the last"
+	// is normal for anything standing still; for moving ones it means a lost update on a tight budget,
+	// where dead reckoning errs far less than stopping (measured: 0.65 m worst at a quarter second).
 	if (time < double(s[0].tick)) {
 		r_state = s[0].state;
 		return true;
 	}
 	r_state = s[s.size() - 1].state;
-	const double ahead = CLAMP((time - double(s[s.size() - 1].tick)) / TICK_HZ, 0.0, 0.25);
+	const double ahead = CLAMP((time - double(s[s.size() - 1].tick)) / TICK_HZ, 0.0, 0.5);
 	r_state.position += r_state.velocity * ahead;
 	return true;
 }
@@ -425,6 +578,20 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_interpolation_delay_ms", "ms"), &PlanetNetClient::set_interpolation_delay_ms);
 	ClassDB::bind_method(D_METHOD("get_interpolation_delay_ms"), &PlanetNetClient::get_interpolation_delay_ms);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interpolation_delay_ms", PROPERTY_HINT_RANGE, "0,500,1,suffix:ms"), "set_interpolation_delay_ms", "get_interpolation_delay_ms");
+	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetNetClient::set_field);
+	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetClient::get_field);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
+	ClassDB::bind_method(D_METHOD("set_prediction_lead_ticks", "ticks"), &PlanetNetClient::set_prediction_lead_ticks);
+	ClassDB::bind_method(D_METHOD("get_prediction_lead_ticks"), &PlanetNetClient::get_prediction_lead_ticks);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "prediction_lead_ticks", PROPERTY_HINT_RANGE, "-10,10,0.1"), "set_prediction_lead_ticks", "get_prediction_lead_ticks");
+	ClassDB::bind_method(D_METHOD("is_predicting"), &PlanetNetClient::is_predicting);
+	ClassDB::bind_method(D_METHOD("get_predicted_tick"), &PlanetNetClient::get_predicted_tick);
+	ClassDB::bind_method(D_METHOD("get_predicted_position"), &PlanetNetClient::get_predicted_position);
+	ClassDB::bind_method(D_METHOD("get_predicted_rotation"), &PlanetNetClient::get_predicted_rotation);
+	ClassDB::bind_method(D_METHOD("get_predicted_position_at", "tick"), &PlanetNetClient::get_predicted_position_at);
+	ClassDB::bind_method(D_METHOD("get_prediction_stats"), &PlanetNetClient::get_prediction_stats);
+	ClassDB::bind_method(D_METHOD("get_predicted_frame", "tick"), &PlanetNetClient::get_predicted_frame);
+	ClassDB::bind_method(D_METHOD("reset_prediction_stats"), &PlanetNetClient::reset_prediction_stats);
 	ClassDB::bind_method(D_METHOD("get_entity_ids"), &PlanetNetClient::get_entity_ids);
 	ClassDB::bind_method(D_METHOD("has_entity", "id"), &PlanetNetClient::has_entity);
 	ClassDB::bind_method(D_METHOD("get_entity_type", "id"), &PlanetNetClient::get_entity_type);

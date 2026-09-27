@@ -57,17 +57,19 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 3;
+constexpr uint16_t PROTOCOL_VERSION = 4;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version
 	MSG_WELCOME, // server -> client: u16 version, u16 server id, u64 your entity, f64 region radius,
-	//              u32 regions per face edge
+	//              u32 regions per face edge, f64 walk speed
 	MSG_PING, // client -> server: f64 client clock (s)
 	MSG_PONG, // server -> client: f64 client clock echoed, f64 server time (ticks)
 	MSG_INPUT, // client -> server: u32 newest snapshot seq, u32 ack bits, u8 n,
-	//            n x (u32 tick, f32 move x, f32 move y, f32 yaw)
-	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u16 n, n x record, u16 m, m x u16 removed handle
+	//            n x (u32 tick the input is for, f32 move x, f32 move y, f32 yaw)
+	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
+	//               [if nonzero: f64 x3 your position, f64 x3 your velocity], u16 n, n x record,
+	//               u16 m, m x u16 removed handle
 };
 
 // Ids carry the server that created them in the top 16 bits, so they stay unique across servers.

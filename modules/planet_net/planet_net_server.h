@@ -40,6 +40,7 @@
 
 #include "planet_net_link.h"
 #include "planet_net_protocol.h"
+#include "planet_net_walker.h"
 
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_set.h"
@@ -85,9 +86,19 @@ private:
 	struct Client {
 		uint64_t entity = 0;
 		bool welcomed = false;
-		uint32_t input_tick = 0;
-		Vector2 move;
-		float yaw = 0.f;
+		// Inputs by the tick they are for. The step for tick T applies inputs[T], or repeats the last
+		// input when it has not arrived; a late input is then useless and the client will be corrected.
+		HashMap<uint32_t, PlanetNet::WalkerInput> inputs;
+		PlanetNet::WalkerInput last_input;
+		bool has_input = false;
+		uint32_t last_applied_tick = 0;
+		uint64_t inputs_applied = 0;
+		uint64_t inputs_missed = 0;
+		// What was applied at each recent tick, and the resulting position, for diagnosing prediction.
+		uint32_t applied_tick[HISTORY_TICKS] = {};
+		PlanetNet::WalkerInput applied_input[HISTORY_TICKS];
+		bool applied_arrived[HISTORY_TICKS] = {};
+		Vector3 applied_position[HISTORY_TICKS];
 		HashMap<uint64_t, View> views;
 		SentRecord sent[SENT_RECORDS];
 		uint32_t last_acked_seq = 0;
@@ -117,14 +128,11 @@ private:
 	uint32_t snapshot_seq = 0;
 	double accumulator = 0.0;
 	double planet_radius = 150000.0;
+	PlanetNet::Walker walker;
 	double region_size = 1000.0;
 	double interest_radius = 3000.0;
 	int client_budget = 32768; // bytes per second per client
 	bool delta_enabled = true;
-	double walk_speed = 5.0;
-	Ref<PlanetField3D> field;
-
-	Vector3 _surface_point(const Vector3 &p_dir) const;
 	void _configure_regions();
 	void _index(uint64_t p_id, Entity &r_entity);
 	void _unindex(uint64_t p_id, Entity &r_entity);
@@ -159,10 +167,11 @@ public:
 	int get_client_budget() const { return client_budget; }
 	void set_delta_enabled(bool p_enabled) { delta_enabled = p_enabled; }
 	bool is_delta_enabled() const { return delta_enabled; }
-	void set_field(const Ref<PlanetField3D> &p_field) { field = p_field; }
-	Ref<PlanetField3D> get_field() const { return field; }
-	void set_walk_speed(double p_speed) { walk_speed = p_speed; }
-	double get_walk_speed() const { return walk_speed; }
+	// The terrain players walk on. Clients must be given the same field to predict exactly.
+	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
+	Ref<PlanetField3D> get_field() const { return walker.field; }
+	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
+	double get_walk_speed() const { return walker.speed; }
 
 	int get_tick() const { return int(tick); }
 	// The server's clock in ticks, including the fraction of the tick in progress.
@@ -187,6 +196,9 @@ public:
 
 	Dictionary get_stats() const;
 	Dictionary get_client_stats(int p_peer) const;
+	// The input the server applied to the client's player at a recent tick, and whether it arrived in
+	// time or was repeated from the tick before: {tick, move, yaw, arrived, position}, or {} if too old.
+	Dictionary get_client_applied(int p_peer, int p_tick) const;
 
 	~PlanetNetServer() { stop(); }
 };

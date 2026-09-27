@@ -64,6 +64,7 @@ void PlanetNetServer::set_server_id(int p_id) {
 
 void PlanetNetServer::set_planet_radius(double p_radius) {
 	planet_radius = p_radius;
+	walker.radius = p_radius;
 	_configure_regions();
 }
 
@@ -103,11 +104,6 @@ void PlanetNetServer::_unindex(uint64_t p_id, Entity &r_entity) {
 		}
 	}
 	r_entity.indexed = false;
-}
-
-Vector3 PlanetNetServer::_surface_point(const Vector3 &p_dir) const {
-	const Vector3 dir = p_dir.normalized();
-	return dir * (field.is_valid() ? double(field->eval_radius(dir)) : planet_radius);
 }
 
 int64_t PlanetNetServer::create_entity(int p_type, const Vector3 &p_position) {
@@ -273,7 +269,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			// Players start near the +Y pole, spread out so they do not stack.
 			const double spread = 20.0 / planet_radius;
 			const Vector3 dir = Vector3(spread * double(p_peer % 8), 1.0, spread * double(p_peer / 8)).normalized();
-			const int64_t id = create_entity(ENTITY_TYPE_PLAYER, _surface_point(dir));
+			const int64_t id = create_entity(ENTITY_TYPE_PLAYER, walker.surface_point(dir));
 			entities[uint64_t(id)].owner_peer = p_peer;
 			client->entity = uint64_t(id);
 			client->welcomed = true;
@@ -285,6 +281,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			w.u64(uint64_t(id));
 			w.f64(regions.radius);
 			w.u32(regions.resolution);
+			w.f64(walker.speed);
 			link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 			emit_signal(SNAME("client_connected"), p_peer, id);
 		} break;
@@ -314,17 +311,16 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 					}
 				}
 			}
-			// Redundant copies of recent input; only the newest one matters until milestone 3 applies
-			// them tick by tick.
+			// Each packet repeats the last few inputs, so one lost packet costs nothing. Inputs for ticks
+			// already simulated are too late to matter.
 			for (uint8_t i = 0; i < n; ++i) {
 				const uint32_t input_tick = r.u32();
-				const float mx = r.f32();
-				const float my = r.f32();
-				const float yaw = r.f32();
-				if (r.ok() && input_tick >= client->input_tick) {
-					client->input_tick = input_tick;
-					client->move = Vector2(CLAMP(mx, -1.f, 1.f), CLAMP(my, -1.f, 1.f));
-					client->yaw = yaw;
+				WalkerInput in;
+				in.move.x = r.f32();
+				in.move.y = r.f32();
+				in.yaw = r.f32();
+				if (r.ok() && input_tick > tick && input_tick <= tick + 4 * TICK_HZ) {
+					client->inputs[input_tick] = in;
 				}
 			}
 		} break;
@@ -362,28 +358,35 @@ void PlanetNetServer::_step() {
 	++tick;
 	const double dt = 1.0 / TICK_HZ;
 	for (KeyValue<int, Client> &C : clients) {
-		Entity *e = C.value.entity != 0 ? entities.getptr(C.value.entity) : nullptr;
+		Client &client = C.value;
+		Entity *e = client.entity != 0 ? entities.getptr(client.entity) : nullptr;
 		if (e == nullptr) {
 			continue;
 		}
-		// Walk on the surface: yaw is measured from local north, move is (right, forward) in [-1, 1].
-		const Vector3 up = e->state.position.normalized();
-		Vector3 north = Vector3(0, 1, 0) - up * up.y;
-		if (north.length_squared() < 1e-12) {
-			north = Vector3(0, 0, -1) - up * up.z;
+		const WalkerInput *arrived = client.inputs.getptr(tick);
+		if (arrived != nullptr) {
+			client.last_input = *arrived;
+			client.has_input = true;
+			++client.inputs_applied;
+		} else if (client.has_input) {
+			++client.inputs_missed;
 		}
-		north.normalize();
-		const Vector3 east = north.cross(up);
-		const Vector3 forward = north * PlanetDetMath::cos(double(C.value.yaw)) + east * PlanetDetMath::sin(double(C.value.yaw));
-		const Vector3 right = forward.cross(up);
-		Vector3 velocity = (forward * double(C.value.move.y) + right * double(C.value.move.x)) * walk_speed;
-		if (velocity.length() > walk_speed) {
-			velocity = velocity.normalized() * walk_speed;
-		}
-		const Vector3 moved = _surface_point(e->state.position + velocity * dt);
-		e->state.velocity = (moved - e->state.position) / dt;
-		e->state.position = moved;
-		e->state.rotation = Basis(right, up, -forward).get_rotation_quaternion();
+		client.inputs.erase(tick);
+		WalkerState s;
+		s.position = e->state.position;
+		s.velocity = e->state.velocity;
+		s.rotation = e->state.rotation;
+		s = walker.step(s, client.last_input, dt);
+		e->state.position = s.position;
+		e->state.velocity = s.velocity;
+		e->state.rotation = s.rotation;
+		// Reported even before any input arrives, so the client starts predicting from the exact state.
+		client.last_applied_tick = tick;
+		const int slot = int(tick % HISTORY_TICKS);
+		client.applied_tick[slot] = tick;
+		client.applied_input[slot] = client.last_input;
+		client.applied_arrived[slot] = arrived != nullptr;
+		client.applied_position[slot] = s.position;
 	}
 	for (KeyValue<uint64_t, Entity> &E : entities) {
 		_record_history(E.value);
@@ -519,6 +522,16 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 	w.u8(MSG_SNAPSHOT);
 	w.u32(snapshot_seq);
 	w.u32(tick);
+	// The client's own player, exactly: this is what its prediction for that input tick must equal.
+	w.u32(r_client.last_applied_tick);
+	if (r_client.last_applied_tick != 0) {
+		w.f64(double(self->state.position.x));
+		w.f64(double(self->state.position.y));
+		w.f64(double(self->state.position.z));
+		w.f64(double(self->state.velocity.x));
+		w.f64(double(self->state.velocity.y));
+		w.f64(double(self->state.velocity.z));
+	}
 	const uint32_t count_at = w.size();
 	w.u16(0);
 	const uint32_t removal_bytes = 2 + 2 * rec.removals.size();
@@ -578,6 +591,26 @@ Dictionary PlanetNetServer::get_client_stats(int p_peer) const {
 	d["in_interest"] = c->in_interest;
 	d["views"] = c->views.size();
 	d["last_acked_seq"] = c->last_acked_seq;
+	d["inputs_applied"] = c->inputs_applied;
+	d["inputs_missed"] = c->inputs_missed;
+	return d;
+}
+
+Dictionary PlanetNetServer::get_client_applied(int p_peer, int p_tick) const {
+	Dictionary d;
+	const Client *c = clients.getptr(p_peer);
+	if (c == nullptr || p_tick < 0) {
+		return d;
+	}
+	const int slot = p_tick % HISTORY_TICKS;
+	if (c->applied_tick[slot] != uint32_t(p_tick)) {
+		return d;
+	}
+	d["tick"] = p_tick;
+	d["move"] = c->applied_input[slot].move;
+	d["yaw"] = c->applied_input[slot].yaw;
+	d["arrived"] = c->applied_arrived[slot];
+	d["position"] = c->applied_position[slot];
 	return d;
 }
 
@@ -631,6 +664,7 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_client_view", "peer"), &PlanetNetServer::get_client_view);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetServer::get_stats);
 	ClassDB::bind_method(D_METHOD("get_client_stats", "peer"), &PlanetNetServer::get_client_stats);
+	ClassDB::bind_method(D_METHOD("get_client_applied", "peer", "tick"), &PlanetNetServer::get_client_applied);
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("client_disconnected", PropertyInfo(Variant::INT, "peer")));

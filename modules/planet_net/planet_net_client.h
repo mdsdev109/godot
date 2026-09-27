@@ -36,11 +36,17 @@
 //
 // See planet-demo's docs/NETWORKING.md. The server sends only what is near, and only what changed
 // since a state this client acknowledged, so entities are tracked individually: each keeps the states
-// it arrived with, which are both its interpolation history and the baselines deltas refer to. The
-// local player is interpolated like everything else until milestone 3 adds prediction.
+// it arrived with, which are both its interpolation history and the baselines deltas refer to.
+//
+// The local player is predicted: the client runs the same walker as the server (planet_net_walker.h)
+// a little ahead of the server's clock, so its input for a tick arrives before the server simulates
+// that tick. Each snapshot carries the server's exact state after the last input it applied; when the
+// prediction for that tick differs, the client takes the server's state and replays its stored
+// inputs, and the visible jump is smoothed away over a tenth of a second.
 
 #include "planet_net_link.h"
 #include "planet_net_protocol.h"
+#include "planet_net_walker.h"
 
 #include "core/object/ref_counted.h"
 
@@ -51,6 +57,8 @@ public:
 	// States kept per entity. Must cover MAX_BASELINE_AGE ticks at the fastest update rate.
 	static constexpr int ENTITY_HISTORY = 64;
 	static constexpr int INPUT_REDUNDANCY = 4;
+	// Predicted ticks kept for reconciliation: must cover a round trip plus the lead.
+	static constexpr int PREDICTION_FRAMES = 128;
 	static constexpr int CLOCK_SAMPLES = 16;
 
 private:
@@ -69,10 +77,10 @@ private:
 		double offset = 0.0;
 	};
 
-	struct InputCommand {
+	struct Frame {
 		uint32_t tick = 0;
-		Vector2 move;
-		float yaw = 0.f;
+		PlanetNet::WalkerInput input;
+		PlanetNet::WalkerState state; // after applying input
 	};
 
 	PlanetNetLink link;
@@ -103,10 +111,22 @@ private:
 	uint64_t records_received = 0;
 	uint64_t records_undecodable = 0;
 
-	Vector2 input_move;
-	float input_yaw = 0.f;
-	uint32_t last_input_tick = 0;
-	LocalVector<InputCommand> recent_inputs;
+	PlanetNet::WalkerInput input;
+	uint32_t last_ack_tick = 0;
+
+	PlanetNet::Walker walker;
+	double prediction_lead_ticks = 2.0;
+	bool predicting = false;
+	uint32_t predicted_tick = 0;
+	PlanetNet::WalkerState predicted;
+	LocalVector<Frame> frames; // oldest first
+	uint32_t last_confirmed_tick = 0;
+	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
+	uint64_t prediction_compared = 0;
+	uint64_t prediction_exact = 0;
+	uint64_t prediction_corrections = 0;
+	uint64_t prediction_resets = 0;
+	double prediction_worst = 0.0;
 
 	void _handle(const LocalVector<uint8_t> &p_data);
 	void _on_snapshot(PlanetNet::Reader &r_reader);
@@ -115,6 +135,8 @@ private:
 	void _update_clock(double p_delta);
 	void _send_ping();
 	void _send_input();
+	void _advance_prediction(double p_delta);
+	void _confirm(uint32_t p_tick, const Vector3 &p_position, const Vector3 &p_velocity);
 	bool _sample(uint64_t p_id, PlanetNet::EntityState &r_state) const;
 
 protected:
@@ -138,6 +160,24 @@ public:
 	double get_rtt_ms() const { return last_rtt * 1000.0; }
 	void set_interpolation_delay_ms(double p_ms) { interpolation_delay_ticks = p_ms * 0.001 * PlanetNet::TICK_HZ; }
 	double get_interpolation_delay_ms() const { return interpolation_delay_ticks * 1000.0 / PlanetNet::TICK_HZ; }
+
+	// The terrain to predict on: must be the server's field, or prediction never matches.
+	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
+	Ref<PlanetField3D> get_field() const { return walker.field; }
+	// Extra ticks of input lead over half the round trip, to absorb jitter.
+	void set_prediction_lead_ticks(double p_ticks) { prediction_lead_ticks = p_ticks; }
+	double get_prediction_lead_ticks() const { return prediction_lead_ticks; }
+	bool is_predicting() const { return predicting; }
+	int get_predicted_tick() const { return int(predicted_tick); }
+	// The local player where it should be drawn: predicted, with corrections smoothed.
+	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
+	Quaternion get_predicted_rotation() const { return predicted.rotation; }
+	// The raw prediction for a tick still in the history, or Vector3() if it is not.
+	Vector3 get_predicted_position_at(int p_tick) const;
+	Dictionary get_prediction_stats() const;
+	void reset_prediction_stats();
+	// The input predicted with at a tick still in the history: {tick, move, yaw, position}, or {}.
+	Dictionary get_predicted_frame(int p_tick) const;
 
 	// Entities the server has told us about and not yet removed.
 	PackedInt64Array get_entity_ids() const;
