@@ -1,0 +1,15 @@
+#!/usr/bin/env python
+from misc.utility.scons_hints import *
+
+Import("env")
+Import("env_modules")
+
+env_planet_net = env_modules.Clone()
+
+# The transport talks to ENet directly rather than through ENetMultiplayerPeer, so it needs the
+# library's headers and the same define the enet module builds it with.
+if env["builtin_enet"]:
+    env_planet_net.Prepend(CPPPATH=["#thirdparty/enet/"])
+    env_planet_net.Append(CPPDEFINES=["GODOT_ENET"])
+
+env_planet_net.add_source_files(env.modules_sources, "*.cpp")
