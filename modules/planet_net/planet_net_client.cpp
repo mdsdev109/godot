@@ -77,6 +77,23 @@ void PlanetNetClient::set_link_conditions(double p_latency_ms, double p_jitter_m
 	link.conditions.loss = p_loss;
 }
 
+void PlanetNetClient::send_world_change(const Vector3 &p_point, const PackedByteArray &p_data) {
+	ERR_FAIL_COND_MSG(p_data.size() > 0xffff, "A world change is at most 65535 bytes.");
+	if (!welcomed) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_WORLD_REQUEST);
+	w.f64(double(p_point.x));
+	w.f64(double(p_point.y));
+	w.f64(double(p_point.z));
+	w.u16(uint16_t(p_data.size()));
+	for (int i = 0; i < p_data.size(); ++i) {
+		w.u8(p_data[i]);
+	}
+	link.send(server_peer, CHANNEL_WORLD, w.data(), true);
+}
+
 void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw) {
 	// Predict with exactly what the server will receive. Inputs travel as float32 and a double build's
 	// Vector2 holds doubles, so an unrounded input predicts a different step on every tick it matters.
@@ -357,6 +374,22 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			welcomed = true;
 			emit_signal(SNAME("connected"), int64_t(entity));
 		} break;
+		case MSG_WORLD_CHANGE: {
+			const uint64_t id = r.u64();
+			Vector3 point;
+			point.x = r.f64();
+			point.y = r.f64();
+			point.z = r.f64();
+			const uint16_t n = r.u16();
+			PackedByteArray data;
+			data.resize(n);
+			for (uint16_t i = 0; i < n; ++i) {
+				data.write[i] = r.u8();
+			}
+			if (r.ok()) {
+				emit_signal(SNAME("world_change"), int64_t(id), point, data);
+			}
+		} break;
 		case MSG_PONG: {
 			const double sent = r.f64();
 			const double server_ticks = r.f64();
@@ -603,5 +636,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetClient::get_stats);
 
 	ADD_SIGNAL(MethodInfo("connected", PropertyInfo(Variant::INT, "entity_id")));
+	ADD_SIGNAL(MethodInfo("world_change", PropertyInfo(Variant::INT, "id"), PropertyInfo(Variant::VECTOR3, "point"),
+			PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));
+	ClassDB::bind_method(D_METHOD("send_world_change", "point", "data"), &PlanetNetClient::send_world_change);
 	ADD_SIGNAL(MethodInfo("disconnected"));
 }

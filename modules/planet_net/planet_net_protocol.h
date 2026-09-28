@@ -57,7 +57,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 6;
+constexpr uint16_t PROTOCOL_VERSION = 7;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -67,6 +67,8 @@ enum MessageType : uint8_t {
 	MSG_PONG, // server -> client: f64 client clock echoed, f64 server time (ticks)
 	MSG_INPUT, // client -> server: u32 newest snapshot seq, u32 ack bits, u8 n,
 	//            n x (u32 tick the input is for, f32 move x, f32 move y, f32 yaw)
+	MSG_WORLD_REQUEST, // client -> server, world channel: f64 x3 point, u16 n, n bytes
+	MSG_WORLD_CHANGE, // server -> client, world channel: u64 id, f64 x3 point, u16 n, n bytes
 	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
 	//               [if nonzero: f64 x3 your position, f64 x3 velocity, f64 x3 walk reference],
 	//               u16 n, n x record,

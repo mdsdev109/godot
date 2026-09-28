@@ -368,6 +368,21 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 			emit_signal(SNAME("client_connected"), p_peer, id);
 		} break;
+		case MSG_WORLD_REQUEST: {
+			Vector3 point;
+			point.x = r.f64();
+			point.y = r.f64();
+			point.z = r.f64();
+			const uint16_t n = r.u16();
+			PackedByteArray data;
+			data.resize(n);
+			for (uint16_t i = 0; i < n; ++i) {
+				data.write[i] = r.u8();
+			}
+			if (r.ok() && client->welcomed) {
+				emit_signal(SNAME("world_change_requested"), p_peer, point, data);
+			}
+		} break;
 		case MSG_PING: {
 			const double client_clock = r.f64();
 			if (!r.ok()) {
@@ -578,6 +593,20 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 	r_client.in_interest = candidates.size();
 	candidates.sort();
 
+	// Regions newly in interest bring their whole world-change journal with them, reliably and in order.
+	for (const uint32_t key : interest) {
+		if (r_client.journal_regions.has(key)) {
+			continue;
+		}
+		r_client.journal_regions.insert(key);
+		const LocalVector<WorldChange> *changes = journal.getptr(key);
+		if (changes != nullptr) {
+			for (const WorldChange &change : *changes) {
+				_send_change(p_peer, change);
+			}
+		}
+	}
+
 	SentRecord &rec = r_client.sent[snapshot_seq % SENT_RECORDS];
 	rec.seq = snapshot_seq;
 	rec.tick = tick;
@@ -702,6 +731,74 @@ Dictionary PlanetNetServer::get_client_applied(int p_peer, int p_tick) const {
 	return d;
 }
 
+// ---------------------------------------------------------------- world changes
+
+void PlanetNetServer::_send_change(int p_peer, const WorldChange &p_change) {
+	Writer w;
+	w.u8(MSG_WORLD_CHANGE);
+	w.u64(p_change.id);
+	w.f64(double(p_change.point.x));
+	w.f64(double(p_change.point.y));
+	w.f64(double(p_change.point.z));
+	w.u16(uint16_t(p_change.data.size()));
+	for (int i = 0; i < p_change.data.size(); ++i) {
+		w.u8(p_change.data[i]);
+	}
+	link.send(p_peer, CHANNEL_WORLD, w.data(), true);
+}
+
+int64_t PlanetNetServer::commit_world_change(const Vector3 &p_point, const PackedByteArray &p_data) {
+	ERR_FAIL_COND_V_MSG(p_data.size() > 0xffff, 0, "A world change is at most 65535 bytes.");
+	WorldChange change;
+	change.id = next_change++;
+	change.point = p_point;
+	change.data = p_data;
+	const uint32_t key = regions.key_of(p_point);
+	journal[key].push_back(change);
+	for (KeyValue<int, Client> &C : clients) {
+		if (C.value.welcomed && C.value.journal_regions.has(key)) {
+			_send_change(C.key, change);
+		}
+	}
+	return int64_t(change.id);
+}
+
+Array PlanetNetServer::get_world_changes() const {
+	LocalVector<const WorldChange *> all;
+	for (const KeyValue<uint32_t, LocalVector<WorldChange>> &R : journal) {
+		for (const WorldChange &c : R.value) {
+			all.push_back(&c);
+		}
+	}
+	// By id, which is commit order.
+	for (uint32_t i = 1; i < all.size(); ++i) {
+		const WorldChange *v = all[i];
+		uint32_t j = i;
+		while (j > 0 && all[j - 1]->id > v->id) {
+			all[j] = all[j - 1];
+			--j;
+		}
+		all[j] = v;
+	}
+	Array out;
+	for (const WorldChange *c : all) {
+		Dictionary d;
+		d["id"] = int64_t(c->id);
+		d["point"] = c->point;
+		d["data"] = c->data;
+		out.push_back(d);
+	}
+	return out;
+}
+
+int PlanetNetServer::get_world_change_count() const {
+	int n = 0;
+	for (const KeyValue<uint32_t, LocalVector<WorldChange>> &R : journal) {
+		n += int(R.value.size());
+	}
+	return n;
+}
+
 // ---------------------------------------------------------------- persistence
 
 namespace {
@@ -709,7 +806,8 @@ namespace {
 constexpr uint32_t MAGIC_WORLD = 0x44574e50; // "PNWD"
 constexpr uint32_t MAGIC_REGION = 0x47524e50; // "PNRG"
 constexpr uint32_t MAGIC_PLAYERS = 0x4c504e50; // "PNPL"
-constexpr uint16_t FILE_FORMAT = 1;
+// 2: region files end with the region's world-change journal.
+constexpr uint16_t FILE_FORMAT = 2;
 
 void write_state(PlanetNet::Writer &w, const PlanetNet::EntityState &s) {
 	w.f64(double(s.position.x));
@@ -801,6 +899,12 @@ Error PlanetNetServer::save_world() {
 			by_region[regions.key_of(E.value.state.position)].push_back(E.key);
 		}
 	}
+	// A region with changes but no entities still needs its file.
+	for (const KeyValue<uint32_t, LocalVector<WorldChange>> &J : journal) {
+		if (!by_region.has(J.key)) {
+			by_region.insert(J.key, LocalVector<uint64_t>());
+		}
+	}
 	for (const KeyValue<uint32_t, LocalVector<uint64_t>> &R : by_region) {
 		Writer w;
 		w.u32(MAGIC_REGION);
@@ -813,6 +917,20 @@ Error PlanetNetServer::save_world() {
 			w.u16(e.state.type);
 			w.u64(e.state.frame);
 			write_state(w, e.state);
+		}
+		const LocalVector<WorldChange> *changes = journal.getptr(R.key);
+		w.u32(changes != nullptr ? changes->size() : 0);
+		if (changes != nullptr) {
+			for (const WorldChange &c : *changes) {
+				w.u64(c.id);
+				w.f64(double(c.point.x));
+				w.f64(double(c.point.y));
+				w.f64(double(c.point.z));
+				w.u16(uint16_t(c.data.size()));
+				for (int i = 0; i < c.data.size(); ++i) {
+					w.u8(c.data[i]);
+				}
+			}
 		}
 		const Error e = _write_file(region_file(R.key), w);
 		err = err == OK ? e : err;
@@ -862,7 +980,9 @@ Error PlanetNetServer::load_world() {
 	region_index.clear();
 	players.clear();
 	saved_regions.clear();
+	journal.clear();
 	regions.configure(planet_radius, region_size);
+	int change_count = 0;
 
 	int region_count = 0;
 	int entity_count = 0;
@@ -901,6 +1021,21 @@ Error PlanetNetServer::load_world() {
 					read_state(r, s);
 					loaded.push_back(s);
 				}
+				const uint32_t nc = r.u32();
+				LocalVector<WorldChange> changes;
+				for (uint32_t i = 0; i < nc && r.ok(); ++i) {
+					WorldChange c;
+					c.id = r.u64();
+					c.point.x = r.f64();
+					c.point.y = r.f64();
+					c.point.z = r.f64();
+					const uint16_t len = r.u16();
+					c.data.resize(len);
+					for (uint16_t k = 0; k < len; ++k) {
+						c.data.write[k] = r.u8();
+					}
+					changes.push_back(c);
+				}
 				if (!r.ok()) {
 					e = ERR_FILE_CORRUPT;
 				} else {
@@ -910,6 +1045,11 @@ Error PlanetNetServer::load_world() {
 							ent.state = s;
 							++entity_count;
 						}
+					}
+					for (const WorldChange &c : changes) {
+						journal[regions.key_of(c.point)].push_back(c);
+						next_change = MAX(next_change, c.id + 1);
+						++change_count;
 					}
 					++region_count;
 				}
@@ -960,6 +1100,7 @@ Error PlanetNetServer::load_world() {
 	last_load_report["regions"] = region_count;
 	last_load_report["entities"] = entity_count;
 	last_load_report["players"] = player_count;
+	last_load_report["world_changes"] = change_count;
 	last_load_report["skipped"] = skipped;
 	return result;
 }
@@ -1069,6 +1210,11 @@ void PlanetNetServer::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("client_disconnected", PropertyInfo(Variant::INT, "peer")));
+	ADD_SIGNAL(MethodInfo("world_change_requested", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::VECTOR3, "point"),
+			PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));
+	ClassDB::bind_method(D_METHOD("commit_world_change", "point", "data"), &PlanetNetServer::commit_world_change);
+	ClassDB::bind_method(D_METHOD("get_world_changes"), &PlanetNetServer::get_world_changes);
+	ClassDB::bind_method(D_METHOD("get_world_change_count"), &PlanetNetServer::get_world_change_count);
 
 	BIND_CONSTANT(ENTITY_TYPE_PLAYER);
 	BIND_CONSTANT(HISTORY_TICKS);

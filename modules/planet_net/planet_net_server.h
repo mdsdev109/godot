@@ -83,6 +83,16 @@ private:
 		LocalVector<uint32_t> removal_epochs;
 	};
 
+	// A change to the world itself -- a dig, later a placed block -- as an opaque payload at a point. The
+	// network layer does not know what it means: it journals it per region, saves it with the region,
+	// and delivers it to every client whose interest covers that region, including clients that
+	// arrive later. Applying one must be the same on every machine and repeatable without harm.
+	struct WorldChange {
+		uint64_t id = 0;
+		Vector3 point;
+		PackedByteArray data;
+	};
+
 	// A player as saved: who they are, which entity is theirs, and where they were when last seen.
 	struct PlayerRecord {
 		uint64_t entity = 0;
@@ -114,6 +124,8 @@ private:
 		uint32_t in_interest = 0;
 		LocalVector<uint16_t> free_handles;
 		uint32_t next_handle = 1;
+		// Regions whose world-change journal this client has been sent; new changes there follow.
+		HashSet<uint32_t> journal_regions;
 	};
 
 	struct Entity {
@@ -161,6 +173,9 @@ private:
 	double autosave_interval = 0.0;
 	double autosave_timer = 0.0;
 	HashMap<String, PlayerRecord> players;
+	HashMap<uint32_t, LocalVector<WorldChange>> journal;
+	uint64_t next_change = 1;
+	void _send_change(int p_peer, const WorldChange &p_change);
 	HashSet<uint32_t> saved_regions; // regions that have a file on disk
 	Dictionary last_load_report;
 	uint64_t _create_with_id(uint64_t p_id, int p_type, const Vector3 &p_position);
@@ -243,6 +258,14 @@ public:
 	PackedStringArray get_player_keys() const;
 	int64_t get_player_entity(const String &p_key) const;
 	Vector3 get_player_position(const String &p_key) const;
+
+	// World changes (see WorldChange). A client's request arrives as world_change_requested; the script
+	// decides, and commit_world_change() journals it and sends it on. Returns the change's id.
+	int64_t commit_world_change(const Vector3 &p_point, const PackedByteArray &p_data);
+	// All committed changes, oldest first: [{id, point, data}]. For a server rebuilding its own copy
+	// of the world after load_world().
+	Array get_world_changes() const;
+	int get_world_change_count() const;
 	// The input the server applied to the client's player at a recent tick, and whether it arrived in
 	// time or was repeated from the tick before: {tick, move, yaw, arrived, position}, or {} if too old.
 	Dictionary get_client_applied(int p_peer, int p_tick) const;

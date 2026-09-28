@@ -162,6 +162,10 @@ public:
 	void set_interpolation_delay_ms(double p_ms) { interpolation_delay_ticks = p_ms * 0.001 * PlanetNet::TICK_HZ; }
 	double get_interpolation_delay_ms() const { return interpolation_delay_ticks * 1000.0 / PlanetNet::TICK_HZ; }
 
+	// Asks the server to make a change to the world (see PlanetNetServer::WorldChange). It arrives back,
+	// if the server accepts it, as world_change -- as do everyone else's changes near this client.
+	void send_world_change(const Vector3 &p_point, const PackedByteArray &p_data);
+
 	// Who this player is. Reconnecting with the same key restores the same entity where it was left.
 	// Empty: anonymous, not saved. Stand-in for accounts, which do not exist yet.
 	void set_player_key(const String &p_key) { player_key = p_key; }
