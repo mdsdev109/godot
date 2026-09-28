@@ -30,6 +30,7 @@
 
 #include "register_types.h"
 
+#include "planet_navigator.h"
 #include "planet_net_client.h"
 #include "planet_net_server.h"
 
@@ -41,6 +42,7 @@ void initialize_planet_net_module(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(PlanetNetServer);
 	GDREGISTER_CLASS(PlanetNetClient);
+	GDREGISTER_CLASS(PlanetNavigator);
 }
 
 void uninitialize_planet_net_module(ModuleInitializationLevel p_level) {
