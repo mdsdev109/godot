@@ -171,6 +171,16 @@ public:
 	void set_player_key(const String &p_key) { player_key = p_key; }
 	String get_player_key() const { return player_key; }
 
+	// The holes to predict on: see PlanetNetServer::add_carve.
+	void add_carve(const Vector3 &p_centre, double p_radius) {
+		walker.carve_centres.push_back(p_centre);
+		walker.carve_radii.push_back(p_radius);
+	}
+	void clear_carves() {
+		walker.carve_centres.clear();
+		walker.carve_radii.clear();
+	}
+
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }

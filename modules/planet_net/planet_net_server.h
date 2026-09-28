@@ -210,6 +210,18 @@ public:
 	// The terrain players walk on. Clients must be given the same field to predict exactly.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }
+	// Holes players walk into (planet space, metres). The game adds one per committed dig; clients must
+	// be given the same, or they mispredict over holes.
+	void add_carve(const Vector3 &p_centre, double p_radius) {
+		walker.carve_centres.push_back(p_centre);
+		walker.carve_radii.push_back(p_radius);
+	}
+	void clear_carves() {
+		walker.carve_centres.clear();
+		walker.carve_radii.clear();
+	}
+	int get_carve_count() const { return int(walker.carve_centres.size()); }
+	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
 	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
 	double get_walk_speed() const { return walker.speed; }
 	// Where new players appear (a direction from the planet's centre); they are spread a few metres

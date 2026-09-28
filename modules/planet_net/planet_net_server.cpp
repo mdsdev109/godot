@@ -1162,6 +1162,10 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetServer::get_field);
 	ClassDB::bind_method(D_METHOD("set_walk_speed", "speed"), &PlanetNetServer::set_walk_speed);
 	ClassDB::bind_method(D_METHOD("get_walk_speed"), &PlanetNetServer::get_walk_speed);
+	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNetServer::add_carve);
+	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNetServer::clear_carves);
+	ClassDB::bind_method(D_METHOD("get_carve_count"), &PlanetNetServer::get_carve_count);
+	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetNetServer::get_ground_radius);
 	ClassDB::bind_method(D_METHOD("set_spawn_direction", "direction"), &PlanetNetServer::set_spawn_direction);
 	ClassDB::bind_method(D_METHOD("get_spawn_direction"), &PlanetNetServer::get_spawn_direction);
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "spawn_direction"), "set_spawn_direction", "get_spawn_direction");

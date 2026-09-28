@@ -64,10 +64,48 @@ struct Walker {
 	double speed = 5.0;
 	double radius = 150000.0; // used when there is no field
 	Ref<PlanetField3D> field;
+	// Dug-out spheres, planet space (planet-demo docs/DIGGING.md): the walker stands on the ground left
+	// after them, not on f. Both ends must hold the same list for predictions to match.
+	LocalVector<Vector3> carve_centres;
+	LocalVector<double> carve_radii;
+
+	// The ground along a direction: f, then, while that point lies inside a carve, the lower point where
+	// the radial line leaves the carve's sphere -- the floor of the hole. Spheres only, so it is exact
+	// and plain arithmetic: the same bits on every machine. It is the analytic twin of the site's voxels,
+	// which approximate the same surface to within their mesher's error.
+	double ground_radius(const Vector3 &p_dir) const {
+		double r = field.is_valid() ? double(field->eval_radius(p_dir)) : radius;
+		for (int pass = 0; pass < 16 && !carve_centres.is_empty(); ++pass) {
+			bool moved = false;
+			for (uint32_t i = 0; i < carve_centres.size(); ++i) {
+				const Vector3 &c = carve_centres[i];
+				const double rc = carve_radii[i];
+				const Vector3 d = p_dir * r - c;
+				if (d.length_squared() >= rc * rc) {
+					continue;
+				}
+				// |dir * t - c| = rc: t = (dir . c) -/+ sqrt((dir . c)^2 - |c|^2 + rc^2). The lower root.
+				const double b = p_dir.dot(c);
+				const double disc = b * b - c.length_squared() + rc * rc;
+				if (disc <= 0.0) {
+					continue;
+				}
+				const double t = b - Math::sqrt(disc);
+				if (t < r) {
+					r = t;
+					moved = true;
+				}
+			}
+			if (!moved) {
+				break;
+			}
+		}
+		return r;
+	}
 
 	Vector3 surface_point(const Vector3 &p_direction) const {
 		const Vector3 dir = p_direction.normalized();
-		return dir * (field.is_valid() ? double(field->eval_radius(dir)) : radius);
+		return dir * ground_radius(dir);
 	}
 
 	// Local north, or any tangent where north is undefined. Only used to start a reference.
