@@ -62,6 +62,20 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetCharacter::clear_carves);
 	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetCharacter::get_ground_radius);
 	ClassDB::bind_method(D_METHOD("is_inside", "point"), &PlanetCharacter::is_inside);
+	ClassDB::bind_method(D_METHOD("set_physics_space", "space"), &PlanetCharacter::set_physics_space);
+	ClassDB::bind_method(D_METHOD("get_physics_space"), &PlanetCharacter::get_physics_space);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &PlanetCharacter::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PlanetCharacter::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("add_exclude", "body"), &PlanetCharacter::add_exclude);
+	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetCharacter::clear_excludes);
+	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetCharacter::set_use_terrain);
+	ClassDB::bind_method(D_METHOD("get_use_terrain"), &PlanetCharacter::get_use_terrain);
+	ClassDB::bind_method(D_METHOD("set_gravity_centre", "centre"), &PlanetCharacter::set_gravity_centre);
+	ClassDB::bind_method(D_METHOD("get_gravity_centre"), &PlanetCharacter::get_gravity_centre);
+	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetCharacter::set_uniform_down);
+	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetCharacter::get_uniform_down);
+	ClassDB::bind_method(D_METHOD("get_up_at", "point"), &PlanetCharacter::get_up_at);
+	ClassDB::bind_method(D_METHOD("cast_ray", "from", "to"), &PlanetCharacter::cast_ray);
 	ClassDB::bind_method(D_METHOD("add_shell", "centre", "inner_radius", "outer_radius"), &PlanetCharacter::add_shell);
 	ClassDB::bind_method(D_METHOD("clear_shells"), &PlanetCharacter::clear_shells);
 	ClassDB::bind_method(D_METHOD("place", "point"), &PlanetCharacter::place);
@@ -81,4 +95,9 @@ void PlanetCharacter::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "jump_speed", PROPERTY_HINT_NONE, "suffix:m/s"), "set_jump_speed", "get_jump_speed");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gravity", PROPERTY_HINT_NONE, "suffix:m/s²"), "set_gravity", "get_gravity");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "can_climb"), "set_can_climb", "get_can_climb");
+	ADD_PROPERTY(PropertyInfo(Variant::RID, "physics_space"), "set_physics_space", "get_physics_space");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_terrain"), "set_use_terrain", "get_use_terrain");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "gravity_centre"), "set_gravity_centre", "get_gravity_centre");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "uniform_down"), "set_uniform_down", "get_uniform_down");
 }

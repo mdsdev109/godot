@@ -85,6 +85,31 @@ public:
 		walker.shell_outer.clear();
 	}
 	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
+
+	// Colliders: the physics space to cast rays in (World3D.space), which layers, and bodies to ignore
+	// (the player's own). Analytic terrain on or off, for a level made only of colliders.
+	void set_physics_space(const RID &p_space) { walker.space = p_space; }
+	RID get_physics_space() const { return walker.space; }
+	void set_collision_mask(uint32_t p_mask) { walker.collision_mask = p_mask; }
+	uint32_t get_collision_mask() const { return walker.collision_mask; }
+	void add_exclude(const RID &p_body) { walker.exclude.insert(p_body); }
+	void clear_excludes() { walker.exclude.clear(); }
+	void set_use_terrain(bool p_use) { walker.use_terrain = p_use; }
+	bool get_use_terrain() const { return walker.use_terrain; }
+	// Down: toward the gravity centre (a planet), or along uniform_down when it is not zero (a level).
+	void set_gravity_centre(const Vector3 &p_centre) { walker.gravity_centre = p_centre; }
+	Vector3 get_gravity_centre() const { return walker.gravity_centre; }
+	void set_uniform_down(const Vector3 &p_down) { walker.uniform_down = p_down; }
+	Vector3 get_uniform_down() const { return walker.uniform_down; }
+	Vector3 get_up_at(const Vector3 &p_point) const { return walker.up_at(p_point); }
+	// The first surface the walker sees from one point to another, or null.
+	Variant cast_ray(const Vector3 &p_from, const Vector3 &p_to) const {
+		Vector3 on;
+		if (walker.cast(p_from, p_to, on)) {
+			return on;
+		}
+		return Variant();
+	}
 	// Whether a point is inside the solid the walker moves on.
 	bool is_inside(const Vector3 &p_point) const { return walker.inside(p_point); }
 
@@ -97,7 +122,7 @@ public:
 	Vector3 get_position() const { return state.position; }
 	Vector3 get_velocity() const { return state.velocity; }
 	Quaternion get_rotation() const { return state.rotation; }
-	Vector3 get_reference() const { return PlanetNet::Walker::transport(state.reference, state.position.normalized()); }
+	Vector3 get_reference() const { return PlanetNet::Walker::transport(state.reference, walker.up_at(state.position)); }
 	// 0 on the ground, 1 in the air, 2 climbing.
 	int get_mode() const { return int(state.mode); }
 	// Climbing: the outward normal of the face held.

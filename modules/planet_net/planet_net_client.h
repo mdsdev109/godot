@@ -220,7 +220,7 @@ public:
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game
 	// turns its camera heading into input yaw with this: atan2(heading . (reference x up), heading .
 	// reference).
-	Vector3 get_predicted_reference() const { return PlanetNet::Walker::transport(predicted.reference, predicted.position.normalized()); }
+	Vector3 get_predicted_reference() const { return PlanetNet::Walker::transport(predicted.reference, walker.up_at(predicted.position)); }
 	// The raw prediction for a tick still in the history, or Vector3() if it is not.
 	Vector3 get_predicted_position_at(int p_tick) const;
 	Dictionary get_prediction_stats() const;
