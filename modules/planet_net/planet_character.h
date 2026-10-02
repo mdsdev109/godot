@@ -73,7 +73,20 @@ public:
 		walker.carve_centres.clear();
 		walker.carve_radii.clear();
 	}
+	// Shells: solid between two radii about a centre (inner 0: a ball). Both ends must hold the same.
+	void add_shell(const Vector3 &p_centre, double p_inner, double p_outer) {
+		walker.shell_centres.push_back(p_centre);
+		walker.shell_inner.push_back(MAX(p_inner, 0.0));
+		walker.shell_outer.push_back(MAX(p_outer, p_inner));
+	}
+	void clear_shells() {
+		walker.shell_centres.clear();
+		walker.shell_inner.clear();
+		walker.shell_outer.clear();
+	}
 	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
+	// Whether a point is inside the solid the walker moves on.
+	bool is_inside(const Vector3 &p_point) const { return walker.inside(p_point); }
 
 	// Stands the character on the ground at a point.
 	void place(const Vector3 &p_point) { state = walker.place(state, p_point); }

@@ -61,6 +61,9 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetCharacter::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetCharacter::clear_carves);
 	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetCharacter::get_ground_radius);
+	ClassDB::bind_method(D_METHOD("is_inside", "point"), &PlanetCharacter::is_inside);
+	ClassDB::bind_method(D_METHOD("add_shell", "centre", "inner_radius", "outer_radius"), &PlanetCharacter::add_shell);
+	ClassDB::bind_method(D_METHOD("clear_shells"), &PlanetCharacter::clear_shells);
 	ClassDB::bind_method(D_METHOD("place", "point"), &PlanetCharacter::place);
 	ClassDB::bind_method(D_METHOD("step", "move", "yaw", "buttons", "delta"), &PlanetCharacter::step, DEFVAL(1.0 / PlanetNet::TICK_HZ));
 	ClassDB::bind_method(D_METHOD("get_position"), &PlanetCharacter::get_position);

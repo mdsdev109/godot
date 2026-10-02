@@ -659,6 +659,8 @@ void PlanetNetClient::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "interpolation_delay_ms", PROPERTY_HINT_RANGE, "0,500,1,suffix:ms"), "set_interpolation_delay_ms", "get_interpolation_delay_ms");
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNetClient::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNetClient::clear_carves);
+	ClassDB::bind_method(D_METHOD("add_shell", "centre", "inner_radius", "outer_radius"), &PlanetNetClient::add_shell);
+	ClassDB::bind_method(D_METHOD("clear_shells"), &PlanetNetClient::clear_shells);
 	ClassDB::bind_method(D_METHOD("set_player_key", "key"), &PlanetNetClient::set_player_key);
 	ClassDB::bind_method(D_METHOD("get_player_key"), &PlanetNetClient::get_player_key);
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_key"), "set_player_key", "get_player_key");

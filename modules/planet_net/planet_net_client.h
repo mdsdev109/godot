@@ -189,6 +189,18 @@ public:
 		walker.carve_radii.clear();
 	}
 
+	// Shells: solid between two radii about a centre (inner 0: a ball). Both ends must hold the same.
+	void add_shell(const Vector3 &p_centre, double p_inner, double p_outer) {
+		walker.shell_centres.push_back(p_centre);
+		walker.shell_inner.push_back(MAX(p_inner, 0.0));
+		walker.shell_outer.push_back(MAX(p_outer, p_inner));
+	}
+	void clear_shells() {
+		walker.shell_centres.clear();
+		walker.shell_inner.clear();
+		walker.shell_outer.clear();
+	}
+
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }

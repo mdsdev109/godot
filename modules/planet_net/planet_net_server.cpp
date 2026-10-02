@@ -1215,6 +1215,8 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_walk_mode", "id"), &PlanetNetServer::get_entity_walk_mode);
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNetServer::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNetServer::clear_carves);
+	ClassDB::bind_method(D_METHOD("add_shell", "centre", "inner_radius", "outer_radius"), &PlanetNetServer::add_shell);
+	ClassDB::bind_method(D_METHOD("clear_shells"), &PlanetNetServer::clear_shells);
 	ClassDB::bind_method(D_METHOD("get_carve_count"), &PlanetNetServer::get_carve_count);
 	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetNetServer::get_ground_radius);
 	ClassDB::bind_method(D_METHOD("set_spawn_direction", "direction"), &PlanetNetServer::set_spawn_direction);
