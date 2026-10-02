@@ -394,6 +394,34 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			w.f64(get_time_ticks());
 			link.send(p_peer, CHANNEL_STATE, w.data(), false);
 		} break;
+		case MSG_TELEPORT: {
+			Vector3 point;
+			point.x = r.f64();
+			point.y = r.f64();
+			point.z = r.f64();
+			Entity *e = client->entity != 0 ? entities.getptr(client->entity) : nullptr;
+			if (!r.ok() || e == nullptr) {
+				return;
+			}
+			// Counted even when refused: the client waits for the count before believing snapshots again,
+			// and then resumes from wherever this leaves the player.
+			++client->teleports;
+			if (!allow_teleport || point.length_squared() < 1.0) {
+				return;
+			}
+			WalkerState s;
+			s.position = e->state.position;
+			s.rotation = e->state.rotation;
+			s.reference = e->walk_reference;
+			s = walker.place(s, point);
+			e->state.position = s.position;
+			e->state.velocity = s.velocity;
+			e->walk_reference = s.reference;
+			e->walk_facing = s.facing;
+			e->walk_mode = s.mode;
+			e->walk_flags = s.flags;
+			e->walk_dash = s.dash;
+		} break;
 		case MSG_INPUT: {
 			const uint32_t newest = r.u32();
 			const uint32_t bits = r.u32();
@@ -417,6 +445,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				in.move.x = r.f32();
 				in.move.y = r.f32();
 				in.yaw = r.f32();
+				in.buttons = r.u8();
 				if (r.ok() && input_tick > tick && input_tick <= tick + 4 * TICK_HZ) {
 					client->inputs[input_tick] = in;
 				}
@@ -475,11 +504,21 @@ void PlanetNetServer::_step() {
 		s.velocity = e->state.velocity;
 		s.rotation = e->state.rotation;
 		s.reference = e->walk_reference;
+		s.facing = e->walk_facing;
+		s.mode = e->walk_mode;
+		s.latch = e->walk_latch;
+		s.flags = e->walk_flags;
+		s.dash = e->walk_dash;
 		s = walker.step(s, client.last_input, dt);
 		e->state.position = s.position;
 		e->state.velocity = s.velocity;
 		e->state.rotation = s.rotation;
 		e->walk_reference = s.reference;
+		e->walk_facing = s.facing;
+		e->walk_mode = s.mode;
+		e->walk_latch = s.latch;
+		e->walk_flags = s.flags;
+		e->walk_dash = s.dash;
 		// Reported even before any input arrives, so the client starts predicting from the exact state.
 		client.last_applied_tick = tick;
 		const int slot = int(tick % HISTORY_TICKS);
@@ -648,6 +687,14 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 		w.f64(double(self->walk_reference.x));
 		w.f64(double(self->walk_reference.y));
 		w.f64(double(self->walk_reference.z));
+		w.u8(self->walk_mode);
+		w.u8(self->walk_latch);
+		w.f64(double(self->walk_facing.x));
+		w.f64(double(self->walk_facing.y));
+		w.f64(double(self->walk_facing.z));
+		w.u8(self->walk_flags);
+		w.u8(self->walk_dash);
+		w.u8(r_client.teleports);
 	}
 	const uint32_t count_at = w.size();
 	w.u16(0);
@@ -726,6 +773,7 @@ Dictionary PlanetNetServer::get_client_applied(int p_peer, int p_tick) const {
 	d["tick"] = p_tick;
 	d["move"] = c->applied_input[slot].move;
 	d["yaw"] = c->applied_input[slot].yaw;
+	d["buttons"] = c->applied_input[slot].buttons;
 	d["arrived"] = c->applied_arrived[slot];
 	d["position"] = c->applied_position[slot];
 	return d;
@@ -1162,6 +1210,9 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetServer::get_field);
 	ClassDB::bind_method(D_METHOD("set_walk_speed", "speed"), &PlanetNetServer::set_walk_speed);
 	ClassDB::bind_method(D_METHOD("get_walk_speed"), &PlanetNetServer::get_walk_speed);
+	ClassDB::bind_method(D_METHOD("set_allow_teleport", "allow"), &PlanetNetServer::set_allow_teleport);
+	ClassDB::bind_method(D_METHOD("get_allow_teleport"), &PlanetNetServer::get_allow_teleport);
+	ClassDB::bind_method(D_METHOD("get_entity_walk_mode", "id"), &PlanetNetServer::get_entity_walk_mode);
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNetServer::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNetServer::clear_carves);
 	ClassDB::bind_method(D_METHOD("get_carve_count"), &PlanetNetServer::get_carve_count);
@@ -1177,6 +1228,7 @@ void PlanetNetServer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "delta_enabled"), "set_delta_enabled", "is_delta_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "walk_speed", PROPERTY_HINT_NONE, "suffix:m/s"), "set_walk_speed", "get_walk_speed");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "allow_teleport"), "set_allow_teleport", "get_allow_teleport");
 
 	ClassDB::bind_method(D_METHOD("get_tick"), &PlanetNetServer::get_tick);
 	ClassDB::bind_method(D_METHOD("get_time_ticks"), &PlanetNetServer::get_time_ticks);

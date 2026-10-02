@@ -66,6 +66,8 @@ void PlanetNetClient::disconnect_from_server() {
 	frames.clear();
 	last_confirmed_tick = 0;
 	smoothing = Vector3();
+	teleports_requested = 0;
+	teleport_restart = false;
 	if (was) {
 		emit_signal(SNAME("disconnected"));
 	}
@@ -94,11 +96,32 @@ void PlanetNetClient::send_world_change(const Vector3 &p_point, const PackedByte
 	link.send(server_peer, CHANNEL_WORLD, w.data(), true);
 }
 
-void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw) {
+void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw, int p_buttons) {
 	// Predict with exactly what the server will receive. Inputs travel as float32 and a double build's
 	// Vector2 holds doubles, so an unrounded input predicts a different step on every tick it matters.
 	input.move = Vector2(float(p_move.x), float(p_move.y));
 	input.yaw = p_yaw;
+	input.buttons = uint8_t(p_buttons);
+}
+
+void PlanetNetClient::request_teleport(const Vector3 &p_point) {
+	if (!welcomed) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_TELEPORT);
+	w.f64(double(p_point.x));
+	w.f64(double(p_point.y));
+	w.f64(double(p_point.z));
+	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+	++teleports_requested;
+	teleport_restart = true;
+	// Go there now; the server's word, when it comes, will agree to within a tick of walking.
+	if (predicting) {
+		predicted = walker.place(predicted, p_point);
+		frames.clear();
+		smoothing = Vector3();
+	}
 }
 
 void PlanetNetClient::poll(double p_delta) {
@@ -210,7 +233,9 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 	}
 	++prediction_compared;
 	const Vector3 mine = frames[at].state.position;
-	if (mine == p_position && frames[at].state.reference == p_state.reference) {
+	if (mine == p_position && frames[at].state.reference == p_state.reference && frames[at].state.mode == p_state.mode &&
+			frames[at].state.facing == p_state.facing && frames[at].state.flags == p_state.flags &&
+			frames[at].state.dash == p_state.dash) {
 		++prediction_exact;
 		return;
 	}
@@ -246,6 +271,8 @@ Dictionary PlanetNetClient::get_predicted_frame(int p_tick) const {
 			d["tick"] = p_tick;
 			d["move"] = frames[i].input.move;
 			d["yaw"] = frames[i].input.yaw;
+			d["buttons"] = frames[i].input.buttons;
+			d["mode"] = frames[i].state.mode;
 			d["position"] = frames[i].state.position;
 			break;
 		}
@@ -343,6 +370,7 @@ void PlanetNetClient::_send_input() {
 		w.f32(frames[i].input.move.x);
 		w.f32(frames[i].input.move.y);
 		w.f32(frames[i].input.yaw);
+		w.u8(frames[i].input.buttons);
 	}
 	link.send(server_peer, CHANNEL_STATE, w.data(), false);
 }
@@ -436,7 +464,23 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 		state.reference.x = r_reader.f64();
 		state.reference.y = r_reader.f64();
 		state.reference.z = r_reader.f64();
-		if (r_reader.ok()) {
+		state.mode = r_reader.u8();
+		state.latch = r_reader.u8();
+		state.facing.x = r_reader.f64();
+		state.facing.y = r_reader.f64();
+		state.facing.z = r_reader.f64();
+		state.flags = r_reader.u8();
+		state.dash = r_reader.u8();
+		const uint8_t teleports = r_reader.u8();
+		if (r_reader.ok() && teleports == teleports_requested) {
+			if (teleport_restart) {
+				// The first word from after our teleport: predict afresh from it.
+				teleport_restart = false;
+				if (predicting) {
+					smoothing += predicted.position - state.position;
+				}
+				predicting = false;
+			}
 			_confirm(applied, state);
 		}
 	}
@@ -601,7 +645,10 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_server_connected"), &PlanetNetClient::is_server_connected);
 	ClassDB::bind_method(D_METHOD("poll", "delta"), &PlanetNetClient::poll);
 	ClassDB::bind_method(D_METHOD("set_link_conditions", "latency_ms", "jitter_ms", "loss"), &PlanetNetClient::set_link_conditions);
-	ClassDB::bind_method(D_METHOD("set_input", "move", "yaw"), &PlanetNetClient::set_input);
+	ClassDB::bind_method(D_METHOD("set_input", "move", "yaw", "buttons"), &PlanetNetClient::set_input, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
+	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
+	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
 	ClassDB::bind_method(D_METHOD("get_local_entity_id"), &PlanetNetClient::get_local_entity_id);
 	ClassDB::bind_method(D_METHOD("get_server_time_estimate"), &PlanetNetClient::get_server_time_estimate);
 	ClassDB::bind_method(D_METHOD("get_render_time"), &PlanetNetClient::get_render_time);

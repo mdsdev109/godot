@@ -1,0 +1,92 @@
+/**************************************************************************/
+/*  planet_character.h                                                    */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#pragma once
+
+// The player's movement without a network: the same walker the server runs and clients predict with
+// (planet_net_walker.h), for a game played offline, and for tests. One controller, so offline and
+// online feel the same. See planet-demo docs/CHARACTER.md.
+
+#include "planet_net_walker.h"
+
+#include "core/object/ref_counted.h"
+
+class PlanetCharacter : public RefCounted {
+	GDCLASS(PlanetCharacter, RefCounted);
+
+	PlanetNet::Walker walker;
+	PlanetNet::WalkerState state;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
+	Ref<PlanetField3D> get_field() const { return walker.field; }
+	void set_planet_radius(double p_radius) { walker.radius = p_radius; }
+	double get_planet_radius() const { return walker.radius; }
+	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
+	double get_walk_speed() const { return walker.speed; }
+	void set_sprint_speed(double p_speed) { walker.sprint_speed = p_speed; }
+	double get_sprint_speed() const { return walker.sprint_speed; }
+	void set_climb_speed(double p_speed) { walker.climb_speed = p_speed; }
+	double get_climb_speed() const { return walker.climb_speed; }
+	void set_jump_speed(double p_speed) { walker.jump_speed = p_speed; }
+	double get_jump_speed() const { return walker.jump_speed; }
+	void set_gravity(double p_gravity) { walker.gravity = p_gravity; }
+	double get_gravity() const { return walker.gravity; }
+	void set_can_climb(bool p_can) { walker.can_climb = p_can; }
+	bool get_can_climb() const { return walker.can_climb; }
+
+	void add_carve(const Vector3 &p_centre, double p_radius) {
+		walker.carve_centres.push_back(p_centre);
+		walker.carve_radii.push_back(p_radius);
+	}
+	void clear_carves() {
+		walker.carve_centres.clear();
+		walker.carve_radii.clear();
+	}
+	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
+
+	// Stands the character on the ground at a point.
+	void place(const Vector3 &p_point) { state = walker.place(state, p_point); }
+	// One tick. move is (right, forward) in [-1, 1]; yaw is the heading in radians from get_reference();
+	// buttons are 1 jump, 2 sprint, 4 let go. Inputs are rounded to float32 as the network rounds them.
+	void step(const Vector2 &p_move, float p_yaw, int p_buttons, double p_dt);
+
+	Vector3 get_position() const { return state.position; }
+	Vector3 get_velocity() const { return state.velocity; }
+	Quaternion get_rotation() const { return state.rotation; }
+	Vector3 get_reference() const { return PlanetNet::Walker::transport(state.reference, state.position.normalized()); }
+	// 0 on the ground, 1 in the air, 2 climbing.
+	int get_mode() const { return int(state.mode); }
+	// Climbing: the horizontal direction into the face.
+	Vector3 get_facing() const { return state.facing; }
+};

@@ -109,6 +109,8 @@ private:
 		HashMap<uint32_t, PlanetNet::WalkerInput> inputs;
 		PlanetNet::WalkerInput last_input;
 		bool has_input = false;
+		// Teleports applied, mod 256; snapshots carry it so the client can tell word from before one.
+		uint8_t teleports = 0;
 		uint32_t last_applied_tick = 0;
 		uint64_t inputs_applied = 0;
 		uint64_t inputs_missed = 0;
@@ -136,7 +138,13 @@ private:
 		// Saved with its region. Players are not: they are saved under their key and exist in the world
 		// only while connected.
 		bool persistent = true;
-		Vector3 walk_reference; // players only: see WalkerState::reference
+		// Players only: the walker's state beyond EntityState (see WalkerState).
+		Vector3 walk_reference;
+		Vector3 walk_facing;
+		uint8_t walk_mode = 0;
+		uint8_t walk_latch = 0;
+		uint8_t walk_flags = 0;
+		uint8_t walk_dash = 0;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -144,6 +152,7 @@ private:
 	PlanetNetLink link;
 	HashMap<int, Client> clients;
 	HashMap<uint64_t, Entity> entities;
+	bool allow_teleport = true;
 	HashMap<uint32_t, LocalVector<uint64_t>> region_index;
 	PlanetNet::Regions regions;
 	uint16_t server_id = 1;
@@ -222,6 +231,9 @@ public:
 	}
 	int get_carve_count() const { return int(walker.carve_centres.size()); }
 	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
+	// Whether clients may ask to be put anywhere (MSG_TELEPORT). A development tool; on for now.
+	void set_allow_teleport(bool p_allow) { allow_teleport = p_allow; }
+	bool get_allow_teleport() const { return allow_teleport; }
 	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
 	double get_walk_speed() const { return walker.speed; }
 	// Where new players appear (a direction from the planet's centre); they are spread a few metres
@@ -238,6 +250,11 @@ public:
 	bool has_entity(int64_t p_id) const { return entities.has(uint64_t(p_id)); }
 	PackedInt64Array get_entity_ids() const;
 	Vector3 get_entity_position(int64_t p_id) const;
+	// A player's walker mode (PlanetNet::WalkerMode: 0 ground, 1 air, 2 climbing); 0 for anything else.
+	int get_entity_walk_mode(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->walk_mode) : 0;
+	}
 	void set_entity_position(int64_t p_id, const Vector3 &p_position);
 	void set_entity_state(int64_t p_id, const Vector3 &p_position, const Quaternion &p_rotation, const Vector3 &p_velocity);
 	// Where the entity was at a (fractional) past tick, from the history ring. Returns the current

@@ -121,6 +121,10 @@ private:
 	uint32_t predicted_tick = 0;
 	PlanetNet::WalkerState predicted;
 	LocalVector<Frame> frames; // oldest first
+	// Teleports asked for, mod 256. Word about our player from before the server applied the latest is
+	// ignored; the first from after it restarts prediction (see request_teleport).
+	uint8_t teleports_requested = 0;
+	bool teleport_restart = false;
 	uint32_t last_confirmed_tick = 0;
 	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
 	uint64_t prediction_compared = 0;
@@ -152,8 +156,12 @@ public:
 
 	void set_link_conditions(double p_latency_ms, double p_jitter_ms, double p_loss);
 
-	// move is (right, forward) in [-1, 1]; yaw is the heading in radians from local north.
-	void set_input(const Vector2 &p_move, float p_yaw);
+	// move is (right, forward) in [-1, 1]; yaw is the heading in radians from the walker's reference
+	// (get_predicted_reference); buttons are PlanetNet::WalkerButton bits: 1 jump, 2 sprint, 4 let go.
+	void set_input(const Vector2 &p_move, float p_yaw, int p_buttons = 0);
+	// Asks the server to put our player on the ground at a point (PlanetNetServer::allow_teleport).
+	// The prediction moves there at once.
+	void request_teleport(const Vector3 &p_point);
 
 	int64_t get_local_entity_id() const { return int64_t(local_entity); }
 	double get_server_time_estimate() const { return server_time; }
@@ -192,6 +200,9 @@ public:
 	// The local player where it should be drawn: predicted, with corrections smoothed.
 	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
 	Quaternion get_predicted_rotation() const { return predicted.rotation; }
+	Vector3 get_predicted_velocity() const { return predicted.velocity; }
+	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing.
+	int get_predicted_mode() const { return int(predicted.mode); }
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game
 	// turns its camera heading into input yaw with this: atan2(heading . (reference x up), heading .
 	// reference).
