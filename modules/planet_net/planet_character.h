@@ -87,6 +87,6 @@ public:
 	Vector3 get_reference() const { return PlanetNet::Walker::transport(state.reference, state.position.normalized()); }
 	// 0 on the ground, 1 in the air, 2 climbing.
 	int get_mode() const { return int(state.mode); }
-	// Climbing: the horizontal direction into the face.
-	Vector3 get_facing() const { return state.facing; }
+	// Climbing: the outward normal of the face held.
+	Vector3 get_normal() const { return state.normal; }
 };

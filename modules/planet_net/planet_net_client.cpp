@@ -234,7 +234,7 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 	++prediction_compared;
 	const Vector3 mine = frames[at].state.position;
 	if (mine == p_position && frames[at].state.reference == p_state.reference && frames[at].state.mode == p_state.mode &&
-			frames[at].state.facing == p_state.facing && frames[at].state.flags == p_state.flags &&
+			frames[at].state.normal == p_state.normal && frames[at].state.flags == p_state.flags &&
 			frames[at].state.dash == p_state.dash) {
 		++prediction_exact;
 		return;
@@ -466,9 +466,9 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 		state.reference.z = r_reader.f64();
 		state.mode = r_reader.u8();
 		state.latch = r_reader.u8();
-		state.facing.x = r_reader.f64();
-		state.facing.y = r_reader.f64();
-		state.facing.z = r_reader.f64();
+		state.normal.x = r_reader.f64();
+		state.normal.y = r_reader.f64();
+		state.normal.z = r_reader.f64();
 		state.flags = r_reader.u8();
 		state.dash = r_reader.u8();
 		const uint8_t teleports = r_reader.u8();
@@ -649,6 +649,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
 	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
+	ClassDB::bind_method(D_METHOD("get_predicted_normal"), &PlanetNetClient::get_predicted_normal);
 	ClassDB::bind_method(D_METHOD("get_local_entity_id"), &PlanetNetClient::get_local_entity_id);
 	ClassDB::bind_method(D_METHOD("get_server_time_estimate"), &PlanetNetClient::get_server_time_estimate);
 	ClassDB::bind_method(D_METHOD("get_render_time"), &PlanetNetClient::get_render_time);

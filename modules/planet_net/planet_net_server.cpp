@@ -417,7 +417,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			e->state.position = s.position;
 			e->state.velocity = s.velocity;
 			e->walk_reference = s.reference;
-			e->walk_facing = s.facing;
+			e->walk_normal = s.normal;
 			e->walk_mode = s.mode;
 			e->walk_flags = s.flags;
 			e->walk_dash = s.dash;
@@ -504,7 +504,7 @@ void PlanetNetServer::_step() {
 		s.velocity = e->state.velocity;
 		s.rotation = e->state.rotation;
 		s.reference = e->walk_reference;
-		s.facing = e->walk_facing;
+		s.normal = e->walk_normal;
 		s.mode = e->walk_mode;
 		s.latch = e->walk_latch;
 		s.flags = e->walk_flags;
@@ -514,7 +514,7 @@ void PlanetNetServer::_step() {
 		e->state.velocity = s.velocity;
 		e->state.rotation = s.rotation;
 		e->walk_reference = s.reference;
-		e->walk_facing = s.facing;
+		e->walk_normal = s.normal;
 		e->walk_mode = s.mode;
 		e->walk_latch = s.latch;
 		e->walk_flags = s.flags;
@@ -689,9 +689,9 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 		w.f64(double(self->walk_reference.z));
 		w.u8(self->walk_mode);
 		w.u8(self->walk_latch);
-		w.f64(double(self->walk_facing.x));
-		w.f64(double(self->walk_facing.y));
-		w.f64(double(self->walk_facing.z));
+		w.f64(double(self->walk_normal.x));
+		w.f64(double(self->walk_normal.y));
+		w.f64(double(self->walk_normal.z));
 		w.u8(self->walk_flags);
 		w.u8(self->walk_dash);
 		w.u8(r_client.teleports);

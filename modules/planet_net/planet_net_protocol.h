@@ -71,7 +71,7 @@ enum MessageType : uint8_t {
 	MSG_WORLD_CHANGE, // server -> client, world channel: u64 id, f64 x3 point, u16 n, n bytes
 	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
 	//               [if nonzero: f64 x3 your position, f64 x3 velocity, f64 x3 walk reference,
-	//                u8 walk mode, u8 button latch, f64 x3 climb facing, u8 walk flags, u8 dash ticks,
+	//                u8 walk mode, u8 button latch, f64 x3 climb normal, u8 walk flags, u8 dash ticks,
 	//                u8 teleports applied],
 	//               u16 n, n x record,
 	//               u16 m, m x u16 removed handle

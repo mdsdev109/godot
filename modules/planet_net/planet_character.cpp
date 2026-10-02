@@ -68,7 +68,7 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_rotation"), &PlanetCharacter::get_rotation);
 	ClassDB::bind_method(D_METHOD("get_reference"), &PlanetCharacter::get_reference);
 	ClassDB::bind_method(D_METHOD("get_mode"), &PlanetCharacter::get_mode);
-	ClassDB::bind_method(D_METHOD("get_facing"), &PlanetCharacter::get_facing);
+	ClassDB::bind_method(D_METHOD("get_normal"), &PlanetCharacter::get_normal);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");

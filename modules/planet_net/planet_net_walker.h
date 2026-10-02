@@ -80,8 +80,8 @@ struct WalkerState {
 	uint8_t mode = MODE_GROUND;
 	// The buttons held last tick, so that holding jump jumps once.
 	uint8_t latch = 0;
-	// Climbing: the horizontal direction into the face, i.e. up it. Followed as the face curves.
-	Vector3 facing;
+	// Climbing: the outward normal of the face held, followed as it bends.
+	Vector3 normal;
 	uint8_t flags = 0; // WalkerFlag bits
 	// Climbing: ticks left of a climb jump, a quick lunge along the face.
 	uint8_t dash = 0;
@@ -202,33 +202,13 @@ struct Walker {
 		return north * ((rn - rs) / (2.0 * h)) + east * ((re - rw) / (2.0 * h));
 	}
 
-	// The ground point reached by going p_distance along the surface -- measured in 3D, so up a wall it
-	// is mostly height -- in a horizontal direction. Bisects how far to go sideways.
-	Vector3 along_surface(const Vector3 &p_from, const Vector3 &p_direction, double p_distance) const {
-		const Vector3 whole = surface_point(p_from + p_direction * p_distance);
-		if (whole.distance_to(p_from) <= p_distance) {
-			return whole;
-		}
-		double lo = 0.0;
-		double hi = p_distance;
-		for (int i = 0; i < 14; ++i) {
-			const double mid = 0.5 * (lo + hi);
-			if (surface_point(p_from + p_direction * mid).distance_to(p_from) > p_distance) {
-				hi = mid;
-			} else {
-				lo = mid;
-			}
-		}
-		return surface_point(p_from + p_direction * lo);
-	}
-
 	// Puts a walker on the ground at a point, standing: teleports and spawns.
 	WalkerState place(const WalkerState &p_state, const Vector3 &p_point) const {
 		WalkerState out = p_state;
 		out.position = surface_point(p_point);
 		out.velocity = Vector3();
 		out.mode = MODE_GROUND;
-		out.facing = Vector3();
+		out.normal = Vector3();
 		out.flags = 0;
 		out.dash = 0;
 		out.reference = transport(p_state.reference, out.position.normalized());
@@ -259,17 +239,17 @@ struct Walker {
 		out.latch = p_input.buttons;
 		switch (p_state.mode) {
 			case MODE_AIR:
-				_air(out, p_state, up, wish * run_speed, p_dt);
+				_air(out, p_state, up, north, wish * run_speed, p_dt);
 				break;
 			case MODE_CLIMB:
-				_climb(out, p_state, up, north, mx, my, pressed, p_dt);
+				_climb(out, p_state, north, mx, my, pressed, p_dt);
 				break;
 			default:
 				if (pressed & BUTTON_JUMP) {
 					out.mode = MODE_AIR;
 					out.velocity = wish * run_speed + up * jump_speed;
 					const WalkerState launched = out;
-					_air(out, launched, up, wish * run_speed, p_dt);
+					_air(out, launched, up, north, wish * run_speed, p_dt);
 				} else {
 					_ground(out, p_state, up, north, wish * run_speed, p_dt);
 				}
@@ -278,6 +258,113 @@ struct Walker {
 		out.reference = transport(north, out.position.normalized());
 		return out;
 	}
+
+	// ------------------------------------------------------------ the ground as a solid
+	//
+	// For climbing, the ground is the solid { r <= ground_radius(dir) }, not a height per direction. The
+	// two differ where a dug hole overhangs: there the height jumps -- a sheer step with no points on it
+	// -- but the solid still has a face, and a climber can hang anywhere on it. Climbing that searched the
+	// height for its next point stalled under every such step.
+
+	bool inside(const Vector3 &p_point) const {
+		return p_point.length() <= ground_radius(p_point.normalized());
+	}
+
+	// The solid's surface between a point outside it and one inside, to a fraction of a millimetre.
+	// Returns the outside end of the final interval, so the result is never inside.
+	Vector3 boundary(const Vector3 &p_out, const Vector3 &p_in) const {
+		Vector3 o = p_out;
+		Vector3 i = p_in;
+		for (int k = 0; k < 12; ++k) {
+			const Vector3 mid = (o + i) * 0.5;
+			if (inside(mid)) {
+				i = mid;
+			} else {
+				o = mid;
+			}
+		}
+		return o;
+	}
+
+	// Sticks a point to the surface near it: into the face along -normal; failing that, radially (over
+	// a convex edge onto the top, or onto the floor at the bottom); failing that, back around a corner
+	// the way it came. p_along is the direction it moved. False if none of them finds the surface.
+	bool attach(const Vector3 &p_point, const Vector3 &p_normal, const Vector3 &p_along, Vector3 &r_on) const {
+		const double a = 0.6;
+		const Vector3 up = p_point.normalized();
+		const Vector3 pairs[8] = {
+			p_point + p_normal * a, p_point - p_normal * a,
+			p_point + up * a, p_point - up * a,
+			p_point - p_normal * a, p_point - p_normal * a - p_along * a,
+			p_point - p_along * a + p_normal * 0.05, p_point,
+		};
+		for (int k = 0; k < 8; k += 2) {
+			if (!inside(pairs[k]) && inside(pairs[k + 1])) {
+				r_on = boundary(pairs[k], pairs[k + 1]);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// The directions on a face: up it, and right when facing it. Where the face is level (a floor), up
+	// is the given fallback tangent.
+	static void face_frame(const Vector3 &p_point, const Vector3 &p_normal, const Vector3 &p_fallback, Vector3 &r_up, Vector3 &r_right) {
+		const Vector3 radial = p_point.normalized();
+		r_up = radial - p_normal * p_normal.dot(radial);
+		if (r_up.length_squared() < 1e-8) {
+			r_up = p_fallback - p_normal * p_normal.dot(p_fallback);
+		}
+		r_up = r_up.normalized();
+		r_right = (-p_normal).cross(r_up).normalized();
+	}
+
+	// The face's outward normal at a point on it, from four probes 0.25 m around it, each stuck to the
+	// surface. Across an edge or a bend the probes land on both sides, so the normal turns smoothly and
+	// a climber rolls over the top or round a corner instead of stopping at it.
+	Vector3 surface_normal(const Vector3 &p_point, const Vector3 &p_normal, const Vector3 &p_fallback) const {
+		Vector3 up_t;
+		Vector3 right;
+		face_frame(p_point, p_normal, p_fallback, up_t, right);
+		const double h = 0.25;
+		const Vector3 offsets[4] = { up_t, -up_t, right, -right };
+		Vector3 q[4];
+		for (int k = 0; k < 4; ++k) {
+			if (!attach(p_point + offsets[k] * h, p_normal, offsets[k], q[k])) {
+				q[k] = p_point + offsets[k] * h;
+			}
+		}
+		Vector3 n = (q[2] - q[3]).cross(q[0] - q[1]);
+		if (n.length_squared() < 1e-12) {
+			return p_normal;
+		}
+		n = n.normalized();
+		return n.dot(p_normal) < 0.0 ? -n : n;
+	}
+
+	// The normal of the height map from its gradient: a first guess, refined by surface_normal().
+	Vector3 height_normal(const Vector3 &p_point, const Vector3 &p_north) const {
+		const Vector3 g = gradient(p_point, p_north);
+		return (p_point.normalized() - g).normalized();
+	}
+
+	static Vector3 face_forward(const Vector3 &p_normal, const Vector3 &p_up, const Vector3 &p_fallback) {
+		Vector3 f = -(p_normal - p_up * p_normal.dot(p_up));
+		if (f.length_squared() < 1e-8) {
+			f = p_fallback - p_up * p_fallback.dot(p_up);
+		}
+		return f.normalized();
+	}
+
+	// Whether a point on the solid's surface is on the height map too: not hanging on a sheer step,
+	// where the height map's point in the same direction is metres below.
+	bool on_heights(const Vector3 &p_point) const {
+		return p_point.length() - ground_radius(p_point.normalized()) < 0.05;
+	}
+
+	// cos(45) and cos(35): the walk limit and the climb's exit, as the vertical part of a normal.
+	static constexpr double COS_WALK = 0.7071067811865476;
+	static constexpr double COS_CLIMB_EXIT = 0.8191520442889918;
 
 private:
 	void _ground(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_north, const Vector3 &p_velocity, double p_dt) const {
@@ -290,15 +377,15 @@ private:
 		const Vector3 next = surface_point(p_in.position + p_velocity * p_dt);
 		const double slope = slope_between(here, next);
 		if (slope > walk_slope) {
-			// Too steep to walk up: climb it, or be stopped by it.
+			// Too steep to walk up: climb it, or be stopped by it. Facing the way we were going; the
+			// first climbing step finds the face itself.
 			r_out.position = here;
 			r_out.velocity = Vector3();
 			if (climbable(next.normalized())) {
+				const Vector3 ahead = (p_velocity - p_up * p_velocity.dot(p_up)).normalized();
 				r_out.mode = MODE_CLIMB;
-				const Vector3 g = gradient(next, p_north);
-				const Vector3 into = g.length_squared() > 1e-6 ? g : p_velocity;
-				r_out.facing = into.normalized();
-				r_out.rotation = facing_rotation(r_out.facing, p_up);
+				r_out.normal = -ahead;
+				r_out.rotation = facing_rotation(ahead, p_up);
 			}
 			return;
 		}
@@ -315,7 +402,7 @@ private:
 		r_out.rotation = facing_rotation(p_velocity.normalized(), p_up);
 	}
 
-	void _air(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_wish, double p_dt) const {
+	void _air(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_north, const Vector3 &p_wish, double p_dt) const {
 		const double vr = p_in.velocity.dot(p_up);
 		Vector3 vh = p_in.velocity - p_up * vr;
 		Vector3 dv = p_wish - vh;
@@ -330,107 +417,115 @@ private:
 		if (vh.length_squared() > 1e-6) {
 			r_out.rotation = facing_rotation(vh.normalized(), p_up);
 		}
-		if (to.length() > ground_radius(to.normalized())) {
+		if (!inside(to)) {
 			r_out.position = to;
 			r_out.velocity = v;
 			return;
 		}
-		// Landed this tick. Find where the path met the ground, so that flying into a cliff stops on its
-		// face rather than on top of it.
-		double lo = 0.0;
-		double hi = 1.0;
-		if (from.length() <= ground_radius(from.normalized())) {
-			hi = 0.0;
-		}
-		for (int i = 0; i < 12 && hi > 0.0; ++i) {
-			const double mid = 0.5 * (lo + hi);
-			const Vector3 p = from + (to - from) * mid;
-			if (p.length() > ground_radius(p.normalized())) {
-				lo = mid;
-			} else {
-				hi = mid;
-			}
-		}
-		const Vector3 land = surface_point(from + (to - from) * lo);
+		// Landed this tick, where the path met the solid -- on a cliff's face if it ran into one, even
+		// partway up a sheer step.
+		const Vector3 land = inside(from) ? from : boundary(from, to);
 		const Vector3 land_up = land.normalized();
-		const Vector3 g = gradient(land, transport(p_in.reference, land_up));
-		r_out.position = land;
-		const bool steep = g.length_squared() > walk_slope * walk_slope;
-		if (!steep) {
+		const Vector3 n = surface_normal(land, height_normal(land, p_north), transport(p_north, land_up));
+		if (n.dot(land_up) >= COS_WALK && on_heights(land)) {
 			r_out.mode = MODE_GROUND;
+			r_out.position = surface_point(land);
 			r_out.velocity = vh;
+			r_out.normal = Vector3();
 			r_out.flags &= ~FLAG_NO_GRAB;
 		} else if (!(p_in.flags & FLAG_NO_GRAB) && climbable(land_up)) {
 			r_out.mode = MODE_CLIMB;
+			r_out.position = land;
 			r_out.velocity = Vector3();
-			r_out.facing = g.normalized();
-			r_out.rotation = facing_rotation(r_out.facing, land_up);
+			r_out.normal = n;
+			r_out.rotation = facing_rotation(face_forward(n, land_up, vh), land_up);
 		} else {
-			// Not holding on: slide down the face. Keep falling, with what of the velocity runs along it.
-			const Vector3 n = (land_up - g).normalized();
+			// Not holding on: slide down the face, keeping what of the velocity runs along it, just off
+			// it so the next tick's path starts outside and can meet it again.
 			r_out.mode = MODE_AIR;
 			r_out.velocity = v - n * MIN(v.dot(n), 0.0);
-			// Just off the face, so the next tick's path starts above the ground and can meet it again.
 			r_out.position = land + n * 0.02;
 		}
 	}
 
-	void _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_north, double p_mx, double p_my, uint8_t p_pressed, double p_dt) const {
-		const Vector3 here = surface_point(p_in.position);
-		// Follow the face round as it curves; keep the old direction where it is too flat to say.
-		const Vector3 g = gradient(here, p_north);
-		Vector3 into = transport(p_in.facing, p_up);
-		if (g.length_squared() > 0.04) {
-			into = g.normalized();
+	void _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_north, double p_mx, double p_my, uint8_t p_pressed, double p_dt) const {
+		const Vector3 here = p_in.position;
+		const Vector3 radial = here.normalized();
+		Vector3 n = p_in.normal;
+		if (n.length_squared() < 0.5) {
+			n = height_normal(here, p_north);
 		}
-		const Vector3 side = into.cross(p_up);
-		r_out.facing = into;
-		r_out.rotation = facing_rotation(into, p_up);
+		Vector3 up_t;
+		Vector3 right;
+		face_frame(here, n, transport(p_north, radial), up_t, right);
+		r_out.rotation = facing_rotation(face_forward(n, radial, -up_t), radial);
 		if (p_pressed & BUTTON_DROP) {
 			r_out.mode = MODE_AIR;
 			r_out.flags |= FLAG_NO_GRAB;
 			r_out.dash = 0;
-			r_out.position = here - into * 0.05;
-			r_out.velocity = -into;
+			r_out.position = here + n * 0.05;
+			r_out.velocity = n;
 			return;
 		}
 		if ((p_pressed & BUTTON_JUMP) && p_my < 0.0) {
 			// Jump with back held: leap off the wall.
 			r_out.mode = MODE_AIR;
 			r_out.dash = 0;
-			r_out.position = here;
-			r_out.velocity = p_up * jump_speed * 0.8 - into * 4.0;
+			r_out.position = here + n * 0.05;
+			r_out.velocity = radial * jump_speed * 0.8 + n * 4.0;
 			return;
 		}
 		if ((p_pressed & BUTTON_JUMP) && p_in.dash == 0) {
 			// A climb jump: a lunge along the face, the way the stick points (up if it points nowhere).
 			r_out.dash = dash_ticks;
 		}
-		Vector3 dir = into * p_my + side * p_mx;
+		Vector3 dir = up_t * p_my + right * p_mx;
 		double amount = MIN(dir.length(), 1.0);
 		double rate = climb_speed;
 		if (r_out.dash > 0) {
 			--r_out.dash;
 			rate = dash_speed;
 			if (amount < 1e-9) {
-				dir = into;
+				dir = up_t;
 			}
 			amount = 1.0;
 		}
+		r_out.position = here;
+		r_out.velocity = Vector3();
 		if (amount < 1e-9) {
-			r_out.position = here;
-			r_out.velocity = Vector3();
 			return;
 		}
 		dir = dir.normalized();
-		const Vector3 next = along_surface(here, dir, rate * amount * p_dt);
-		r_out.position = next;
-		r_out.velocity = (next - p_in.position) / p_dt;
-		// Over the top, or down at the bottom: walking again once the ground is gentle.
-		const Vector3 g_next = gradient(next, p_north);
-		if (g_next.length_squared() < climb_exit_slope * climb_exit_slope) {
+		// Along the face, then back onto it -- in sub-steps no longer than a probe's reach is safe for.
+		const double total = rate * amount * p_dt;
+		const int pieces = int(Math::ceil(total / 0.1));
+		Vector3 at = here;
+		for (int k = 0; k < pieces; ++k) {
+			Vector3 on;
+			if (!attach(at + dir * (total / pieces), n, dir, on)) {
+				break; // nowhere to hold: stay where the last piece left us
+			}
+			n = surface_normal(on, n, transport(p_north, on.normalized()));
+			at = on;
+			Vector3 new_right;
+			face_frame(at, n, dir, up_t, new_right);
+			dir = up_t * p_my + new_right * p_mx;
+			if (dir.length_squared() < 1e-12) {
+				dir = up_t;
+			}
+			dir = dir.normalized();
+		}
+		const Vector3 at_up = at.normalized();
+		r_out.position = at;
+		r_out.velocity = (at - p_in.position) / p_dt;
+		r_out.normal = n;
+		r_out.rotation = facing_rotation(face_forward(n, at_up, -up_t), at_up);
+		// Over the top, or down at the bottom: walking again once the ground is gentle -- and once we
+		// are on it, not still on a sheer face whose top the probes have reached.
+		if (n.dot(at_up) >= COS_CLIMB_EXIT && on_heights(at)) {
 			r_out.mode = MODE_GROUND;
-			r_out.facing = Vector3();
+			r_out.position = surface_point(at);
+			r_out.normal = Vector3();
 			r_out.dash = 0;
 		}
 	}

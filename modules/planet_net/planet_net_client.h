@@ -203,6 +203,8 @@ public:
 	Vector3 get_predicted_velocity() const { return predicted.velocity; }
 	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing.
 	int get_predicted_mode() const { return int(predicted.mode); }
+	// Climbing: the outward normal of the face held.
+	Vector3 get_predicted_normal() const { return predicted.normal; }
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game
 	// turns its camera heading into input yaw with this: atan2(heading . (reference x up), heading .
 	// reference).

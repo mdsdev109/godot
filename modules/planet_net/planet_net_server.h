@@ -140,7 +140,7 @@ private:
 		bool persistent = true;
 		// Players only: the walker's state beyond EntityState (see WalkerState).
 		Vector3 walk_reference;
-		Vector3 walk_facing;
+		Vector3 walk_normal;
 		uint8_t walk_mode = 0;
 		uint8_t walk_latch = 0;
 		uint8_t walk_flags = 0;
