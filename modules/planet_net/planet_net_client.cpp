@@ -646,6 +646,12 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("poll", "delta"), &PlanetNetClient::poll);
 	ClassDB::bind_method(D_METHOD("set_link_conditions", "latency_ms", "jitter_ms", "loss"), &PlanetNetClient::set_link_conditions);
 	ClassDB::bind_method(D_METHOD("set_input", "move", "yaw", "buttons"), &PlanetNetClient::set_input, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_physics_space", "space"), &PlanetNetClient::set_physics_space);
+	ClassDB::bind_method(D_METHOD("get_physics_space"), &PlanetNetClient::get_physics_space);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &PlanetNetClient::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PlanetNetClient::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("add_exclude", "body"), &PlanetNetClient::add_exclude);
+	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetNetClient::clear_excludes);
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
 	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
@@ -667,6 +673,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetNetClient::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetClient::get_field);
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
+	ADD_PROPERTY(PropertyInfo(Variant::RID, "physics_space"), "set_physics_space", "get_physics_space");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ClassDB::bind_method(D_METHOD("set_prediction_lead_ticks", "ticks"), &PlanetNetClient::set_prediction_lead_ticks);
 	ClassDB::bind_method(D_METHOD("get_prediction_lead_ticks"), &PlanetNetClient::get_prediction_lead_ticks);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "prediction_lead_ticks", PROPERTY_HINT_RANGE, "-10,10,0.1"), "set_prediction_lead_ticks", "get_prediction_lead_ticks");

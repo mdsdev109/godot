@@ -201,6 +201,16 @@ public:
 		walker.shell_outer.clear();
 	}
 
+	// Colliders the walker stands on and climbs, besides the analytic ground (planet_net_walker.h): a
+	// physics space, which layers of it, and bodies to ignore. Server and clients must see the same
+	// colliders on these layers, or predictions miss wherever they differ.
+	void set_physics_space(const RID &p_space) { walker.space = p_space; }
+	RID get_physics_space() const { return walker.space; }
+	void set_collision_mask(uint32_t p_mask) { walker.collision_mask = p_mask; }
+	uint32_t get_collision_mask() const { return walker.collision_mask; }
+	void add_exclude(const RID &p_body) { walker.exclude.insert(p_body); }
+	void clear_excludes() { walker.exclude.clear(); }
+
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }

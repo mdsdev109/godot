@@ -1208,6 +1208,12 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_delta_enabled"), &PlanetNetServer::is_delta_enabled);
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetNetServer::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetNetServer::get_field);
+	ClassDB::bind_method(D_METHOD("set_physics_space", "space"), &PlanetNetServer::set_physics_space);
+	ClassDB::bind_method(D_METHOD("get_physics_space"), &PlanetNetServer::get_physics_space);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &PlanetNetServer::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PlanetNetServer::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("add_exclude", "body"), &PlanetNetServer::add_exclude);
+	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetNetServer::clear_excludes);
 	ClassDB::bind_method(D_METHOD("set_walk_speed", "speed"), &PlanetNetServer::set_walk_speed);
 	ClassDB::bind_method(D_METHOD("get_walk_speed"), &PlanetNetServer::get_walk_speed);
 	ClassDB::bind_method(D_METHOD("set_allow_teleport", "allow"), &PlanetNetServer::set_allow_teleport);
@@ -1229,6 +1235,8 @@ void PlanetNetServer::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "client_budget", PROPERTY_HINT_NONE, "suffix:B/s"), "set_client_budget", "get_client_budget");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "delta_enabled"), "set_delta_enabled", "is_delta_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
+	ADD_PROPERTY(PropertyInfo(Variant::RID, "physics_space"), "set_physics_space", "get_physics_space");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "walk_speed", PROPERTY_HINT_NONE, "suffix:m/s"), "set_walk_speed", "get_walk_speed");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "allow_teleport"), "set_allow_teleport", "get_allow_teleport");
 

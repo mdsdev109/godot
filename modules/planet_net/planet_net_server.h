@@ -245,6 +245,15 @@ public:
 	// Whether clients may ask to be put anywhere (MSG_TELEPORT). A development tool; on for now.
 	void set_allow_teleport(bool p_allow) { allow_teleport = p_allow; }
 	bool get_allow_teleport() const { return allow_teleport; }
+	// Colliders the walker stands on and climbs, besides the analytic ground (planet_net_walker.h): a
+	// physics space, which layers of it, and bodies to ignore. Server and clients must see the same
+	// colliders on these layers, or predictions miss wherever they differ.
+	void set_physics_space(const RID &p_space) { walker.space = p_space; }
+	RID get_physics_space() const { return walker.space; }
+	void set_collision_mask(uint32_t p_mask) { walker.collision_mask = p_mask; }
+	uint32_t get_collision_mask() const { return walker.collision_mask; }
+	void add_exclude(const RID &p_body) { walker.exclude.insert(p_body); }
+	void clear_excludes() { walker.exclude.clear(); }
 	void set_walk_speed(double p_speed) { walker.speed = p_speed; }
 	double get_walk_speed() const { return walker.speed; }
 	// Where new players appear (a direction from the planet's centre); they are spread a few metres
