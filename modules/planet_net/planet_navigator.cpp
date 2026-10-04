@@ -174,10 +174,36 @@ double PlanetNavigator::_height(uint64_t p_node) {
 	}
 	const int k = int(j % TILE) * TILE + int(i % TILE);
 	if (!tile->filled[k]) {
-		tile->height[k] = ground.ground_radius(_node_dir(p_node));
+		tile->height[k] = _column_height(_node_dir(p_node));
 		tile->filled[k] = true;
 	}
 	return tile->height[k];
+}
+
+// How far above the ground a column is searched for colliders standing in it: tall enough for a cliff's
+// top, so that a cell on a cliff is the cliff and the slope rule keeps walkers off it.
+static constexpr double COLUMN_CLEARANCE_M = 30.0;
+// A step is refused when something stands between its two cells at this height.
+static constexpr double KNEE_M = 0.5;
+
+double PlanetNavigator::_column_height(const Vector3 &p_dir) const {
+	const double base = ground.ground_radius(p_dir);
+	if (!ground.space.is_valid()) {
+		return base;
+	}
+	Vector3 top;
+	if (ground.physics_cast(p_dir * (base + COLUMN_CLEARANCE_M), p_dir * (base - 0.5), top)) {
+		return MAX(base, top.length());
+	}
+	return base;
+}
+
+bool PlanetNavigator::_blocked(const Vector3 &p_here, const Vector3 &p_there) const {
+	if (!ground.space.is_valid()) {
+		return false;
+	}
+	Vector3 hit;
+	return ground.physics_cast(p_here + p_here.normalized() * KNEE_M, p_there + p_there.normalized() * KNEE_M, hit);
 }
 
 bool PlanetNavigator::_node_walkable(double p_height) const {
@@ -280,7 +306,7 @@ PackedVector3Array PlanetNavigator::find_path(const Vector3 &p_from, const Vecto
 			const Vector3 dir_there = _node_dir(next[k]);
 			const double run = dir_here.distance_to(dir_there) * 0.5 * (h_here + h_there);
 			const double rise = Math::abs(h_there - h_here);
-			if (run <= 0.0 || rise > run * max_slope) {
+			if (run <= 0.0 || rise > run * max_slope || _blocked(here, there)) {
 				continue;
 			}
 			const double cost = here.distance_to(there) * (1.0 + slope_weight * rise / run);
@@ -334,6 +360,12 @@ void PlanetNavigator::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_expansions"), "set_max_expansions", "get_max_expansions");
 
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNavigator::add_carve);
+	ClassDB::bind_method(D_METHOD("set_physics_space", "space"), &PlanetNavigator::set_physics_space);
+	ClassDB::bind_method(D_METHOD("get_physics_space"), &PlanetNavigator::get_physics_space);
+	ClassDB::bind_method(D_METHOD("set_collision_mask", "mask"), &PlanetNavigator::set_collision_mask);
+	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PlanetNavigator::get_collision_mask);
+	ClassDB::bind_method(D_METHOD("clear_cache"), &PlanetNavigator::clear_cache);
+	ClassDB::bind_method(D_METHOD("ground_at", "point"), &PlanetNavigator::ground_at);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNavigator::clear_carves);
 	ClassDB::bind_method(D_METHOD("find_path", "from", "to"), &PlanetNavigator::find_path);
 	ClassDB::bind_method(D_METHOD("ground_point", "point"), &PlanetNavigator::ground_point);

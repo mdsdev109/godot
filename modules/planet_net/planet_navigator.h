@@ -70,6 +70,8 @@ private:
 	uint64_t _node_of(const Vector3 &p_dir) const;
 	Vector3 _node_dir(uint64_t p_node) const;
 	double _height(uint64_t p_node);
+	double _column_height(const Vector3 &p_dir) const;
+	bool _blocked(const Vector3 &p_here, const Vector3 &p_there) const;
 	bool _node_walkable(double p_height) const;
 	int _neighbours(uint64_t p_node, uint64_t r_out[8]) const;
 
@@ -94,6 +96,26 @@ public:
 	// change at once.
 	void add_carve(const Vector3 &p_centre, double p_radius);
 	void clear_carves();
+
+	// Colliders: with a physics space set, a cell stands on the top of whatever is in its column (a rock,
+	// a cliff) and a step is refused when something stands between the two cells at knee height. The
+	// space's colliders change as they stream; clear_cache() after they do.
+	void set_physics_space(const RID &p_space) {
+		ground.space = p_space;
+		_clear_tiles();
+	}
+	RID get_physics_space() const { return ground.space; }
+	void set_collision_mask(uint32_t p_mask) {
+		ground.collision_mask = p_mask;
+		_clear_tiles();
+	}
+	uint32_t get_collision_mask() const { return ground.collision_mask; }
+	void clear_cache() { _clear_tiles(); }
+	// The ground under a point, exactly there rather than at its cell's centre: what to stand a body on.
+	Vector3 ground_at(const Vector3 &p_point) const {
+		const Vector3 dir = p_point.normalized();
+		return dir * _column_height(dir);
+	}
 
 	// Ground points from the cell containing p_from to the cell containing p_to, both included, or
 	// empty when there is no walkable path within max_expansions.

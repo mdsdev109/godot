@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "planet_character.h"
+#include "planet_math.h"
 #include "planet_navigator.h"
 #include "planet_net_client.h"
 #include "planet_net_server.h"
@@ -45,6 +46,7 @@ void initialize_planet_net_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlanetNetClient);
 	GDREGISTER_CLASS(PlanetNavigator);
 	GDREGISTER_CLASS(PlanetCharacter);
+	GDREGISTER_ABSTRACT_CLASS(PlanetMath);
 }
 
 void uninitialize_planet_net_module(ModuleInitializationLevel p_level) {
