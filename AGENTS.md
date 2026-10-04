@@ -43,7 +43,10 @@ modules/planet_net/              the client/server layer: PlanetNetServer, Plane
 ```
 
 The field must stay free of C runtime transcendentals -- use `planet_det_math.h` -- or Windows and
-Linux compute different terrain. See planet-demo's `docs/DETERMINISM.md`. The network layer's design
+Linux compute different terrain. The same goes for game scripts that place anything the network
+server must place too (rocks, cliffs, the lattice mapping): GDScript's `sin`/`cos`/`tan` and
+`Basis(axis, angle)` are the C runtime; `PlanetMath` (modules/planet_net/planet_math.h) is
+`PlanetDetMath` for scripts. See planet-demo's `docs/DETERMINISM.md`. The network layer's design
 is planet-demo's `docs/NETWORKING.md`.
 
 ## Building
