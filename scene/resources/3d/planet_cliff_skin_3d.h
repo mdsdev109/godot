@@ -92,6 +92,12 @@ public:
 		double grass_blend_m = 3.5;
 		double edge_sink_m = 2.0;
 		int64_t seed_value = 7319;
+		// Cuts: corridors kept clear of rock, where a road climbs the wall -- a gully through the face.
+		// Each is a segment between two unit directions (cuts[2i], cuts[2i+1]) with a half width in
+		// metres; the face fades back to the ground over cut_fade_m beyond it.
+		LocalVector<Vector3> cuts;
+		LocalVector<double> cut_half_widths;
+		double cut_fade_m = 6.0;
 	};
 
 protected:

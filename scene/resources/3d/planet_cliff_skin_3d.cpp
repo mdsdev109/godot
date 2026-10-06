@@ -345,7 +345,18 @@ PlanetCliffSkin3D::Params PlanetCliffSkin3D::params_from_dictionary(const Dictio
 	PCS_READ(grass_blend_m, double)
 	PCS_READ(edge_sink_m, double)
 	PCS_READ(seed_value, int64_t)
+	PCS_READ(cut_fade_m, double)
 #undef PCS_READ
+	if (p_params.has("cuts") && p_params.has("cut_half_widths")) {
+		const PackedVector3Array cuts = p_params["cuts"];
+		const PackedFloat64Array half = p_params["cut_half_widths"];
+		const int count = MIN(cuts.size() / 2, half.size());
+		for (int i = 0; i < count; i++) {
+			p.cuts.push_back(cuts[2 * i].normalized());
+			p.cuts.push_back(cuts[2 * i + 1].normalized());
+			p.cut_half_widths.push_back(half[i]);
+		}
+	}
 	return p;
 }
 
@@ -435,6 +446,35 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 		return empty();
 	}
 
+	// Cuts: how much of the face each point keeps (1 away from every cut, 0 inside one). Distances are
+	// taken on the base sphere, so a cut is the same corridor whatever the ground does across it.
+	Grid keep;
+	const bool cut = !prm.cut_half_widths.is_empty();
+	if (cut) {
+		keep.resize(nn);
+		parallel_for(n, [&](int b) {
+			for (int a = 0; a < n; a++) {
+				const int k = b * n + a;
+				const Vector3 p = dirs[k] * R;
+				double k_keep = 1.0;
+				for (uint32_t c = 0; c < prm.cut_half_widths.size(); c++) {
+					const Vector3 ca = prm.cuts[2 * c] * R;
+					const Vector3 cb = prm.cuts[2 * c + 1] * R;
+					const Vector3 ab = cb - ca;
+					const double len2 = ab.length_squared();
+					const double t = len2 > 0.0 ? CLAMP((p - ca).dot(ab) / len2, 0.0, 1.0) : 0.0;
+					const double d = p.distance_to(ca + ab * t);
+					const double half = prm.cut_half_widths[c];
+					k_keep = MIN(k_keep, smoothstep(half, half + MAX(prm.cut_fade_m, 0.01), d));
+				}
+				keep[k] = k_keep;
+			}
+		});
+		for (int i = 0; i < nn; i++) {
+			mask[i] *= keep[i];
+		}
+	}
+
 	// 3. Filters: inner wall, lip extent, smoothed gradient, foot and rim heights, wall slope, scale.
 	// The apron: slope that is still steep, though not wall, within the foot search of a wall joins it.
 	// Without it the face covered only the steepest band of a short or shallow slope, stood vertical
@@ -456,9 +496,20 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 					* smoothstep(0.3, 0.7, near_wall[i]) * below;
 			mask[i] = MAX(mask[i], apron);
 		}
+		if (cut) {
+			for (int i = 0; i < nn; i++) {
+				mask[i] *= keep[i];
+			}
+		}
 	}
 	const Grid inner = extreme2d(mask, n, blur, false);
-	const Grid ext = box_blur(extreme2d(mask, n, lip_r, true), n, 2);
+	Grid ext = box_blur(extreme2d(mask, n, lip_r, true), n, 2);
+	if (cut) {
+		// The lip spreads from the wall by dilation; it must not grow back over the cut.
+		for (int i = 0; i < nn; i++) {
+			ext[i] *= keep[i];
+		}
+	}
 	LocalVector<Vector3> gsmooth;
 	{
 		Grid xs, ys, zs;
