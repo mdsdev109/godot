@@ -20,8 +20,8 @@ There used to be a `planet_work/` scratch and staging directory at this root. It
 work happens in git worktrees of the game project now, and nothing should recreate it. See
 `C:\Users\mschw\Home\Godot\Projects\planet-demo\docs\WORKFLOW.md`.
 
-Do not push without the user asking. Remotes: `github.com/mschwarz1/godot` and
-`github.com/mschwarz1/godot_voxel`, branch `planet` on both.
+Do not push without the user asking. Remotes: `github.com/mdsdev109/godot` and
+`github.com/mdsdev109/godot_voxel`, branch `planet` on both.
 
 ## What this fork adds
 
@@ -68,7 +68,7 @@ bin/godot.linuxbsd.editor.double.x86_64.mono --headless --generate-mono-glue mod
 python modules/mono/build_scripts/build_assemblies.py --godot-output-dir bin --godot-platform=linuxbsd --precision=double
 ```
 
-`modules/voxel` is a separate clone: `git clone -b planet https://github.com/mschwarz1/godot_voxel.git modules/voxel`.
+`modules/voxel` is a separate clone: `git clone -b planet https://github.com/mdsdev109/godot_voxel.git modules/voxel`.
 
 - **`precision=double` is mandatory.** Single precision cannot represent this radius.
 - **After any API or precision change, run `buildScript.bat glue`.** Otherwise the editor
