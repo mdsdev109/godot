@@ -20,7 +20,8 @@ There used to be a `planet_work/` scratch and staging directory at this root. It
 work happens in git worktrees of the game project now, and nothing should recreate it. See
 `C:\Users\mschw\Home\Godot\Projects\planet-demo\docs\WORKFLOW.md`.
 
-Do not push. Neither fork is pushed without the user asking.
+Do not push without the user asking. Remotes: `github.com/mschwarz1/godot` and
+`github.com/mschwarz1/godot_voxel`, branch `planet` on both.
 
 ## What this fork adds
 
@@ -36,6 +37,8 @@ core/math/planet_hash_noise.h    the noise
 core/math/planet_hash_noise_shader.h   its exact GLSL twin -- EDIT WITH THE FILE ABOVE
 
 scene/resources/3d/planet_{field,biome,shape}_3d.*   script-facing resources
+scene/resources/3d/planet_cliff_skin_3d.*    the rock face over steep walls (planet-demo's cliff_skin.gd
+                                             tunes it); "cuts" keep corridors bare where a road climbs
 core/math/planet_det_math.h      sin/atan2/pow/... that give the same bits on every machine
 servers/physics_3d/              SHAPE_PLANET, plumbed through the server, dummy and wrap_mt
 modules/jolt_physics/shapes/     JoltPlanetShape3D and JoltCustomPlanetShape
@@ -56,6 +59,16 @@ buildScript.bat          # optimized double-precision Mono editor -- what the pr
 buildScript.bat dev      # separate dev executable, symbols, -O0
 buildScript.bat glue     # regenerate Mono glue + assemblies. NOT OPTIONAL after an API change.
 ```
+
+On Linux (what the script runs, minus the Windows flags; not yet tried on this fork):
+
+```
+scons platform=linuxbsd module_mono_enabled=yes precision=double voxel_tests=yes optimize=speed_trace -j$(nproc)
+bin/godot.linuxbsd.editor.double.x86_64.mono --headless --generate-mono-glue modules/mono/glue --precision=double
+python modules/mono/build_scripts/build_assemblies.py --godot-output-dir bin --godot-platform=linuxbsd --precision=double
+```
+
+`modules/voxel` is a separate clone: `git clone -b planet https://github.com/mschwarz1/godot_voxel.git modules/voxel`.
 
 - **`precision=double` is mandatory.** Single precision cannot represent this radius.
 - **After any API or precision change, run `buildScript.bat glue`.** Otherwise the editor
