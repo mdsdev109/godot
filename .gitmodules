@@ -1,0 +1,4 @@
+[submodule "modules/voxel"]
+	path = modules/voxel
+	url = https://github.com/mdsdev109/godot_voxel.git
+	branch = planet

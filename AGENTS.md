@@ -14,7 +14,9 @@ are the place to start. Come back here only for engine-level changes.
 | **`planet`** | **the work.** Everything below assumes you are on it. |
 
 `modules/voxel` is a **separate repository** (fork of `Zylann/godot_voxel`, also on a `planet`
-branch) and is gitignored here. Voxel changes commit there, not here.
+branch), included here as a git submodule since 2026-10-10. Clone with `--recurse-submodules`, or
+run `git submodule update --init` after a plain clone. Voxel changes commit in the submodule and
+are pushed there first; then commit the new submodule pointer here.
 
 There used to be a `planet_work/` scratch and staging directory at this root. It is gone:
 work happens in git worktrees of the game project now, and nothing should recreate it. See
@@ -68,7 +70,8 @@ bin/godot.linuxbsd.editor.double.x86_64.mono --headless --generate-mono-glue mod
 python modules/mono/build_scripts/build_assemblies.py --godot-output-dir bin --godot-platform=linuxbsd --precision=double
 ```
 
-`modules/voxel` is a separate clone: `git clone -b planet https://github.com/mdsdev109/godot_voxel.git modules/voxel`.
+Get the voxel module with the engine: `git clone --recurse-submodules -b planet https://github.com/mdsdev109/godot.git`
+(or `git submodule update --init` in an existing clone).
 
 - **`precision=double` is mandatory.** Single precision cannot represent this radius.
 - **After any API or precision change, run `buildScript.bat glue`.** Otherwise the editor
