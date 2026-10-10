@@ -62,13 +62,8 @@ buildScript.bat dev      # separate dev executable, symbols, -O0
 buildScript.bat glue     # regenerate Mono glue + assemblies. NOT OPTIONAL after an API change.
 ```
 
-On Linux (what the script runs, minus the Windows flags; not yet tried on this fork):
-
-```
-scons platform=linuxbsd module_mono_enabled=yes precision=double voxel_tests=yes optimize=speed_trace -j$(nproc)
-bin/godot.linuxbsd.editor.double.x86_64.mono --headless --generate-mono-glue modules/mono/glue --precision=double
-python modules/mono/build_scripts/build_assemblies.py --godot-output-dir bin --godot-platform=linuxbsd --precision=double
-```
+On Linux, `./buildScript.sh` takes the same modes (not yet tried end to end on this fork). It is
+a separate copy of the `.bat`, so a change to one belongs in the other.
 
 Get the voxel module with the engine: `git clone --recurse-submodules -b planet https://github.com/mdsdev109/godot.git`
 (or `git submodule update --init` in an existing clone).
