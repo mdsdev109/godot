@@ -409,18 +409,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			if (!allow_teleport || point.length_squared() < 1.0) {
 				return;
 			}
-			WalkerState s;
-			s.position = e->state.position;
-			s.rotation = e->state.rotation;
-			s.reference = e->walk_reference;
-			s = walker.place(s, point);
-			e->state.position = s.position;
-			e->state.velocity = s.velocity;
-			e->walk_reference = s.reference;
-			e->walk_normal = s.normal;
-			e->walk_mode = s.mode;
-			e->walk_flags = s.flags;
-			e->walk_dash = s.dash;
+			store_walker_state(*e, walker.place(walker_state(*e), point));
 		} break;
 		case MSG_INPUT: {
 			const uint32_t newest = r.u32();
@@ -499,26 +488,8 @@ void PlanetNetServer::_step() {
 			++client.inputs_missed;
 		}
 		client.inputs.erase(tick);
-		WalkerState s;
-		s.position = e->state.position;
-		s.velocity = e->state.velocity;
-		s.rotation = e->state.rotation;
-		s.reference = e->walk_reference;
-		s.normal = e->walk_normal;
-		s.mode = e->walk_mode;
-		s.latch = e->walk_latch;
-		s.flags = e->walk_flags;
-		s.dash = e->walk_dash;
-		s = walker.step(s, client.last_input, dt);
-		e->state.position = s.position;
-		e->state.velocity = s.velocity;
-		e->state.rotation = s.rotation;
-		e->walk_reference = s.reference;
-		e->walk_normal = s.normal;
-		e->walk_mode = s.mode;
-		e->walk_latch = s.latch;
-		e->walk_flags = s.flags;
-		e->walk_dash = s.dash;
+		const WalkerState s = walker.step(walker_state(*e), client.last_input, dt);
+		store_walker_state(*e, s);
 		// Reported even before any input arrives, so the client starts predicting from the exact state.
 		client.last_applied_tick = tick;
 		const int slot = int(tick % HISTORY_TICKS);
@@ -684,16 +655,20 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 		w.f64(double(self->state.velocity.x));
 		w.f64(double(self->state.velocity.y));
 		w.f64(double(self->state.velocity.z));
-		w.f64(double(self->walk_reference.x));
-		w.f64(double(self->walk_reference.y));
-		w.f64(double(self->walk_reference.z));
-		w.u8(self->walk_mode);
-		w.u8(self->walk_latch);
-		w.f64(double(self->walk_normal.x));
-		w.f64(double(self->walk_normal.y));
-		w.f64(double(self->walk_normal.z));
-		w.u8(self->walk_flags);
-		w.u8(self->walk_dash);
+		w.f64(double(self->walk.reference.x));
+		w.f64(double(self->walk.reference.y));
+		w.f64(double(self->walk.reference.z));
+		w.u8(self->walk.mode);
+		w.u8(self->walk.latch);
+		w.f64(double(self->walk.normal.x));
+		w.f64(double(self->walk.normal.y));
+		w.f64(double(self->walk.normal.z));
+		w.u8(self->walk.flags);
+		w.u8(self->walk.dash);
+		w.u16(self->walk.stamina);
+		w.u8(self->walk.rest);
+		w.u8(self->walk.action);
+		w.u8(self->walk.action_ticks);
 		w.u8(r_client.teleports);
 	}
 	const uint32_t count_at = w.size();
@@ -1219,6 +1194,8 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_allow_teleport", "allow"), &PlanetNetServer::set_allow_teleport);
 	ClassDB::bind_method(D_METHOD("get_allow_teleport"), &PlanetNetServer::get_allow_teleport);
 	ClassDB::bind_method(D_METHOD("get_entity_walk_mode", "id"), &PlanetNetServer::get_entity_walk_mode);
+	ClassDB::bind_method(D_METHOD("get_entity_stamina", "id"), &PlanetNetServer::get_entity_stamina);
+	ClassDB::bind_method(D_METHOD("is_entity_invulnerable", "id"), &PlanetNetServer::is_entity_invulnerable);
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetNetServer::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetNetServer::clear_carves);
 	ClassDB::bind_method(D_METHOD("add_shell", "centre", "inner_radius", "outer_radius"), &PlanetNetServer::add_shell);

@@ -138,16 +138,28 @@ private:
 		// Saved with its region. Players are not: they are saved under their key and exist in the world
 		// only while connected.
 		bool persistent = true;
-		// Players only: the walker's state beyond EntityState (see WalkerState).
-		Vector3 walk_reference;
-		Vector3 walk_normal;
-		uint8_t walk_mode = 0;
-		uint8_t walk_latch = 0;
-		uint8_t walk_flags = 0;
-		uint8_t walk_dash = 0;
+		// Players only: the walker's state beyond EntityState. Its position, velocity and rotation are not
+		// kept here but in `state`, which is what replicates: read and write it through walker_state()
+		// and store_walker_state(), never field by field -- new walker state then cannot be forgotten.
+		PlanetNet::WalkerState walk;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
+
+	static PlanetNet::WalkerState walker_state(const Entity &p_entity) {
+		PlanetNet::WalkerState s = p_entity.walk;
+		s.position = p_entity.state.position;
+		s.velocity = p_entity.state.velocity;
+		s.rotation = p_entity.state.rotation;
+		return s;
+	}
+	static void store_walker_state(Entity &r_entity, const PlanetNet::WalkerState &p_state) {
+		r_entity.walk = p_state;
+		r_entity.state.position = p_state.position;
+		r_entity.state.velocity = p_state.velocity;
+		r_entity.state.rotation = p_state.rotation;
+		r_entity.state.pose = PlanetNet::pose_of(p_state);
+	}
 
 	PlanetNetLink link;
 	HashMap<int, Client> clients;
@@ -270,10 +282,21 @@ public:
 	bool has_entity(int64_t p_id) const { return entities.has(uint64_t(p_id)); }
 	PackedInt64Array get_entity_ids() const;
 	Vector3 get_entity_position(int64_t p_id) const;
-	// A player's walker mode (PlanetNet::WalkerMode: 0 ground, 1 air, 2 climbing); 0 for anything else.
+	// A player's walker mode (PlanetNet::WalkerMode: 0 ground, 1 air, 2 climbing, 3 gliding); 0 for
+	// anything else.
 	int get_entity_walk_mode(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));
-		return e != nullptr ? int(e->walk_mode) : 0;
+		return e != nullptr ? int(e->walk.mode) : 0;
+	}
+	// A player's stamina, in the walker's units (0..stamina_max).
+	int get_entity_stamina(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->walk.stamina) : 0;
+	}
+	// Whether hits pass through the entity this tick (a player mid-dodge).
+	bool is_entity_invulnerable(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr && walker.invulnerable(e->walk);
 	}
 	void set_entity_position(int64_t p_id, const Vector3 &p_position);
 	void set_entity_state(int64_t p_id, const Vector3 &p_position, const Quaternion &p_rotation, const Vector3 &p_velocity);

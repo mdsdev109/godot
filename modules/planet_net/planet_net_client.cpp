@@ -233,9 +233,7 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 	}
 	++prediction_compared;
 	const Vector3 mine = frames[at].state.position;
-	if (mine == p_position && frames[at].state.reference == p_state.reference && frames[at].state.mode == p_state.mode &&
-			frames[at].state.normal == p_state.normal && frames[at].state.flags == p_state.flags &&
-			frames[at].state.dash == p_state.dash) {
+	if (same_walk(frames[at].state, p_state)) {
 		++prediction_exact;
 		return;
 	}
@@ -274,6 +272,9 @@ Dictionary PlanetNetClient::get_predicted_frame(int p_tick) const {
 			d["buttons"] = frames[i].input.buttons;
 			d["mode"] = frames[i].state.mode;
 			d["position"] = frames[i].state.position;
+			d["velocity"] = frames[i].state.velocity;
+			d["stamina"] = frames[i].state.stamina;
+			d["action"] = frames[i].state.action;
 			break;
 		}
 	}
@@ -471,6 +472,10 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 		state.normal.z = r_reader.f64();
 		state.flags = r_reader.u8();
 		state.dash = r_reader.u8();
+		state.stamina = r_reader.u16();
+		state.rest = r_reader.u8();
+		state.action = r_reader.u8();
+		state.action_ticks = r_reader.u8();
 		const uint8_t teleports = r_reader.u8();
 		if (r_reader.ok() && teleports == teleports_requested) {
 			if (teleport_restart) {
@@ -625,6 +630,16 @@ Quaternion PlanetNetClient::get_entity_rotation(int64_t p_id) const {
 	return _sample(uint64_t(p_id), e) ? e.rotation : Quaternion();
 }
 
+Vector3 PlanetNetClient::get_entity_velocity(int64_t p_id) const {
+	EntityState e;
+	return _sample(uint64_t(p_id), e) ? e.velocity : Vector3();
+}
+
+int PlanetNetClient::get_entity_pose(int64_t p_id) const {
+	EntityState e;
+	return _sample(uint64_t(p_id), e) ? int(e.pose) : 0;
+}
+
 Dictionary PlanetNetClient::get_stats() const {
 	Dictionary d;
 	d["connected"] = welcomed;
@@ -655,6 +670,10 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
 	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
+	ClassDB::bind_method(D_METHOD("get_predicted_stamina"), &PlanetNetClient::get_predicted_stamina);
+	ClassDB::bind_method(D_METHOD("is_predicted_exhausted"), &PlanetNetClient::is_predicted_exhausted);
+	ClassDB::bind_method(D_METHOD("get_predicted_action"), &PlanetNetClient::get_predicted_action);
+	ClassDB::bind_method(D_METHOD("get_predicted_action_ticks"), &PlanetNetClient::get_predicted_action_ticks);
 	ClassDB::bind_method(D_METHOD("get_predicted_normal"), &PlanetNetClient::get_predicted_normal);
 	ClassDB::bind_method(D_METHOD("get_local_entity_id"), &PlanetNetClient::get_local_entity_id);
 	ClassDB::bind_method(D_METHOD("get_server_time_estimate"), &PlanetNetClient::get_server_time_estimate);
@@ -693,6 +712,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_update_tick", "id"), &PlanetNetClient::get_entity_update_tick);
 	ClassDB::bind_method(D_METHOD("get_entity_position", "id"), &PlanetNetClient::get_entity_position);
 	ClassDB::bind_method(D_METHOD("get_entity_rotation", "id"), &PlanetNetClient::get_entity_rotation);
+	ClassDB::bind_method(D_METHOD("get_entity_velocity", "id"), &PlanetNetClient::get_entity_velocity);
+	ClassDB::bind_method(D_METHOD("get_entity_pose", "id"), &PlanetNetClient::get_entity_pose);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetClient::get_stats);
 
 	ADD_SIGNAL(MethodInfo("connected", PropertyInfo(Variant::INT, "entity_id")));

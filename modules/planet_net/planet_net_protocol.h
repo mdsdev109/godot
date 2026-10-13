@@ -57,7 +57,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 8;
+constexpr uint16_t PROTOCOL_VERSION = 9;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -72,7 +72,7 @@ enum MessageType : uint8_t {
 	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
 	//               [if nonzero: f64 x3 your position, f64 x3 velocity, f64 x3 walk reference,
 	//                u8 walk mode, u8 button latch, f64 x3 climb normal, u8 walk flags, u8 dash ticks,
-	//                u8 teleports applied],
+	//                u16 stamina, u8 stamina rest, u8 action, u8 action ticks, u8 teleports applied],
 	//               u16 n, n x record,
 	//               u16 m, m x u16 removed handle
 	MSG_TELEPORT, // client -> server, control: f64 x3 point. Put me on the ground there (if allowed).
@@ -94,6 +94,9 @@ struct EntityState {
 	Vector3 position;
 	Quaternion rotation;
 	Vector3 velocity;
+	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | action << 4); 0 for
+	// anything that is not a player.
+	uint8_t pose = 0;
 };
 
 // ---------------------------------------------------------------- regions
@@ -192,6 +195,7 @@ struct Wire {
 	float offset[3] = { 0.f, 0.f, 0.f };
 	uint32_t rotation = 0;
 	uint16_t velocity[3] = { 0, 0, 0 };
+	uint8_t pose = 0;
 
 	static Wire encode(const EntityState &p_state, const Regions &p_regions) {
 		Wire w;
@@ -206,6 +210,7 @@ struct Wire {
 		w.velocity[0] = Math::make_half_float(float(p_state.velocity.x));
 		w.velocity[1] = Math::make_half_float(float(p_state.velocity.y));
 		w.velocity[2] = Math::make_half_float(float(p_state.velocity.z));
+		w.pose = p_state.pose;
 		return w;
 	}
 
@@ -217,6 +222,7 @@ struct Wire {
 		s.position = p_regions.centre(region) + Vector3(offset[0], offset[1], offset[2]);
 		s.rotation = unpack_rotation(rotation);
 		s.velocity = Vector3(Math::half_to_float(velocity[0]), Math::half_to_float(velocity[1]), Math::half_to_float(velocity[2]));
+		s.pose = pose;
 		return s;
 	}
 };
@@ -232,6 +238,7 @@ enum RecordFlags : uint8_t {
 	RECORD_POSITION = 1 << 2,
 	RECORD_ROTATION = 1 << 3,
 	RECORD_VELOCITY = 1 << 4,
+	RECORD_POSE = 1 << 5,
 };
 
 // ---------------------------------------------------------------- byte streams
@@ -268,7 +275,7 @@ public:
 	bool record(uint16_t p_handle, uint64_t p_id, const Wire &p_now, const Wire *p_base, uint8_t p_age) {
 		uint8_t flags = 0;
 		if (p_base == nullptr) {
-			flags = RECORD_FULL | RECORD_KIND | RECORD_POSITION | RECORD_ROTATION | RECORD_VELOCITY;
+			flags = RECORD_FULL | RECORD_KIND | RECORD_POSITION | RECORD_ROTATION | RECORD_VELOCITY | RECORD_POSE;
 		} else {
 			if (p_now.type != p_base->type || p_now.frame != p_base->frame) {
 				flags |= RECORD_KIND;
@@ -281,6 +288,9 @@ public:
 			}
 			if (std::memcmp(p_now.velocity, p_base->velocity, sizeof(p_now.velocity)) != 0) {
 				flags |= RECORD_VELOCITY;
+			}
+			if (p_now.pose != p_base->pose) {
+				flags |= RECORD_POSE;
 			}
 			if (flags == 0) {
 				return false;
@@ -310,6 +320,9 @@ public:
 			u16(p_now.velocity[0]);
 			u16(p_now.velocity[1]);
 			u16(p_now.velocity[2]);
+		}
+		if (flags & RECORD_POSE) {
+			u8(p_now.pose);
 		}
 		return true;
 	}
@@ -372,6 +385,9 @@ public:
 			r_wire.velocity[0] = u16();
 			r_wire.velocity[1] = u16();
 			r_wire.velocity[2] = u16();
+		}
+		if (p_flags & RECORD_POSE) {
+			r_wire.pose = u8();
 		}
 	}
 

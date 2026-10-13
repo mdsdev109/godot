@@ -127,4 +127,21 @@ public:
 	int get_mode() const { return int(state.mode); }
 	// Climbing: the outward normal of the face held.
 	Vector3 get_normal() const { return state.normal; }
+	// Stamina in the walker's units (0..get_stamina_max()), and whether it is spent out and refilling.
+	int get_stamina() const { return int(state.stamina); }
+	// Sets the stamina (clamped to the bar); a full bar also ends exhaustion. Offline only: online the
+	// server owns it.
+	void set_stamina(int p_stamina) {
+		state.stamina = uint16_t(CLAMP(p_stamina, 0, int(walker.stamina_max)));
+		if (state.stamina == walker.stamina_max) {
+			state.flags &= ~PlanetNet::FLAG_EXHAUSTED;
+		}
+	}
+	int get_stamina_max() const { return int(walker.stamina_max); }
+	void set_stamina_max(int p_max) { walker.stamina_max = uint16_t(CLAMP(p_max, 1, 65535)); }
+	bool is_exhausted() const { return (state.flags & PlanetNet::FLAG_EXHAUSTED) != 0; }
+	// PlanetNet::WalkerAction (0 none, 1 dodge), how many ticks into it, and whether hits pass through.
+	int get_action() const { return int(state.action); }
+	int get_action_ticks() const { return int(state.action_ticks); }
+	bool is_invulnerable() const { return walker.invulnerable(state); }
 };

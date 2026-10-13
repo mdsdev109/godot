@@ -223,8 +223,14 @@ public:
 	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
 	Quaternion get_predicted_rotation() const { return predicted.rotation; }
 	Vector3 get_predicted_velocity() const { return predicted.velocity; }
-	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing.
+	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing, 3 gliding.
 	int get_predicted_mode() const { return int(predicted.mode); }
+	// Stamina in the walker's units (0..stamina_max), and whether it is spent out and refilling.
+	int get_predicted_stamina() const { return int(predicted.stamina); }
+	bool is_predicted_exhausted() const { return (predicted.flags & PlanetNet::FLAG_EXHAUSTED) != 0; }
+	// PlanetNet::WalkerAction (0 none, 1 dodge) and how many ticks into it.
+	int get_predicted_action() const { return int(predicted.action); }
+	int get_predicted_action_ticks() const { return int(predicted.action_ticks); }
 	// Climbing: the outward normal of the face held.
 	Vector3 get_predicted_normal() const { return predicted.normal; }
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game
@@ -248,6 +254,9 @@ public:
 	// Interpolated at get_render_time().
 	Vector3 get_entity_position(int64_t p_id) const;
 	Quaternion get_entity_rotation(int64_t p_id) const;
+	Vector3 get_entity_velocity(int64_t p_id) const;
+	// What the entity's body is doing (PlanetNet::pose_of: walk mode | action << 4).
+	int get_entity_pose(int64_t p_id) const;
 
 	Dictionary get_stats() const;
 

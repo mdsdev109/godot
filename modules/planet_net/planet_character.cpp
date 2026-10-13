@@ -86,6 +86,14 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_reference"), &PlanetCharacter::get_reference);
 	ClassDB::bind_method(D_METHOD("get_mode"), &PlanetCharacter::get_mode);
 	ClassDB::bind_method(D_METHOD("get_normal"), &PlanetCharacter::get_normal);
+	ClassDB::bind_method(D_METHOD("get_stamina"), &PlanetCharacter::get_stamina);
+	ClassDB::bind_method(D_METHOD("set_stamina", "stamina"), &PlanetCharacter::set_stamina);
+	ClassDB::bind_method(D_METHOD("get_stamina_max"), &PlanetCharacter::get_stamina_max);
+	ClassDB::bind_method(D_METHOD("set_stamina_max", "max"), &PlanetCharacter::set_stamina_max);
+	ClassDB::bind_method(D_METHOD("is_exhausted"), &PlanetCharacter::is_exhausted);
+	ClassDB::bind_method(D_METHOD("get_action"), &PlanetCharacter::get_action);
+	ClassDB::bind_method(D_METHOD("get_action_ticks"), &PlanetCharacter::get_action_ticks);
+	ClassDB::bind_method(D_METHOD("is_invulnerable"), &PlanetCharacter::is_invulnerable);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");

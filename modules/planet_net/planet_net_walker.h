@@ -53,17 +53,27 @@ enum WalkerMode : uint8_t {
 	MODE_GROUND = 0,
 	MODE_AIR = 1,
 	MODE_CLIMB = 2,
+	MODE_GLIDE = 3, // under the glider: a capped sink, steered
 };
 
 enum WalkerFlag : uint8_t {
 	// Let go of a wall: slide down faces rather than grab them, until standing on walkable ground.
 	FLAG_NO_GRAB = 1,
+	// Out of stamina: no sprint, no glider, no holding a wall, until it has refilled completely.
+	FLAG_EXHAUSTED = 2,
 };
 
 enum WalkerButton : uint8_t {
 	BUTTON_JUMP = 1,
 	BUTTON_SPRINT = 2,
 	BUTTON_DROP = 4, // let go of a wall
+	BUTTON_DODGE = 8,
+};
+
+// What the walker is doing on top of its mode.
+enum WalkerAction : uint8_t {
+	ACTION_NONE = 0,
+	ACTION_DODGE = 1, // a committed roll along the ground
 };
 
 struct WalkerInput {
@@ -88,9 +98,30 @@ struct WalkerState {
 	uint8_t flags = 0; // WalkerFlag bits
 	// Climbing: ticks left of a climb jump, a quick lunge along the face.
 	uint8_t dash = 0;
+	// Stamina, in whole units (Walker::stamina_max is a full bar): an integer count, so both ends hold
+	// the same. Sprinting, climbing, a climb jump, a dodge and the glider spend it.
+	uint16_t stamina = 1000;
+	// Ticks before stamina starts to refill, counted down from the last time it was spent.
+	uint8_t rest = 0;
+	uint8_t action = ACTION_NONE; // WalkerAction
+	uint8_t action_ticks = 0; // ticks into the action
 };
 
-// planet-demo docs/CHARACTER.md. Three modes: on the ground, in the air, climbing.
+// Whether two walker states are the same to the bit: everything a step reads. What a prediction must
+// equal (planet_net_client.cpp).
+inline bool same_walk(const WalkerState &a, const WalkerState &b) {
+	return a.position == b.position && a.velocity == b.velocity && a.reference == b.reference &&
+			a.mode == b.mode && a.normal == b.normal && a.flags == b.flags && a.dash == b.dash &&
+			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks;
+}
+
+// What the body is doing, for drawing it on other machines: the mode in the low four bits, the action
+// in the high four. Replicated with every player (EntityState::pose).
+inline uint8_t pose_of(const WalkerState &p_state) {
+	return uint8_t((p_state.mode & 15u) | ((p_state.action & 15u) << 4));
+}
+
+// planet-demo docs/CHARACTER.md. Four modes: on the ground, in the air, climbing, gliding.
 //
 // The walker knows the world only through ray casts: the first surface met going from one point to
 // another. Rays work against every kind of ground -- convex colliders, trimeshes (which have no inside),
@@ -108,7 +139,8 @@ struct WalkerState {
 struct Walker {
 	double speed = 5.0;
 	double sprint_speed = 9.0;
-	double climb_speed = 2.0;
+	// BotW pace: a hand over hand a little under a second (planet-demo assets/character/authored).
+	double climb_speed = 1.2;
 	double jump_speed = 7.0;
 	double gravity = 20.0;
 	double air_accel = 6.0;
@@ -123,6 +155,37 @@ struct Walker {
 	double body_radius = 0.3;
 	// Stand-in for climbable materials and objects: false makes nothing climbable.
 	bool can_climb = true;
+
+	// Movement feel (planet-demo docs/CHARACTER.md, milestone 4). On the ground the velocity eases
+	// toward the stick's instead of taking it in one tick: quick enough to feel direct, slow enough to
+	// have weight -- 0 to a run in an eighth of a second, a stop in a twelfth.
+	double ground_accel = 40.0; // m/s^2 toward the wished velocity
+	double ground_brake = 60.0; // m/s^2 when the stick is let go or turned against the way it goes
+
+	// Stamina, per tick at 30 Hz. A full bar: 8 s of sprint, 11 s climbing, 33 s under the glider.
+	uint16_t stamina_max = 1000;
+	uint16_t sprint_cost = 4;
+	uint16_t climb_cost = 3; // moving on a wall; holding still costs nothing, as in BotW
+	uint16_t climb_jump_cost = 120;
+	uint16_t dodge_cost = 150;
+	uint16_t glide_cost = 1;
+	uint16_t stamina_regen = 12; // once rested: empty to full in under 3 s
+	uint8_t stamina_rest_ticks = 30; // a second after spending before it refills
+
+	// The dodge: a roll along the ground in a committed direction, decelerating, with a window in the
+	// middle where hits do not land (invulnerable()). About 3 m in 0.6 s.
+	uint8_t dodge_ticks = 18;
+	double dodge_speed = 7.5;
+	double dodge_end_speed = 3.0;
+	uint8_t dodge_guard_from = 2; // ticks into the roll
+	uint8_t dodge_guard_to = 12;
+
+	// The glider: opened by jump in the air once past the top of a jump; a capped sink, steered.
+	double glide_sink = 2.2; // m/s down at most
+	double glide_brake = 25.0; // m/s^2 slowing a faster fall to the sink
+	double glide_speed = 9.0; // horizontal, at full stick
+	double glide_accel = 5.0;
+	double glide_open_rise = 2.0; // rising faster than this, jump does not open it
 
 	// Down.
 	Vector3 gravity_centre;
@@ -476,6 +539,11 @@ struct Walker {
 		return f.normalized();
 	}
 
+	// Whether hits pass through this walker this tick: the middle of a dodge.
+	bool invulnerable(const WalkerState &p_state) const {
+		return p_state.action == ACTION_DODGE && p_state.action_ticks >= dodge_guard_from && p_state.action_ticks < dodge_guard_to;
+	}
+
 	WalkerState step(const WalkerState &p_state, const WalkerInput &p_input, double p_dt) const {
 		const Vector3 up = up_at(p_state.position);
 		const Vector3 north = transport(p_state.reference, up);
@@ -490,33 +558,150 @@ struct Walker {
 			wish = wish.normalized();
 		}
 		const uint8_t pressed = p_input.buttons & ~p_state.latch;
-		const double run_speed = (p_input.buttons & BUTTON_SPRINT) ? sprint_speed : speed;
+		const bool moving = wish.length_squared() > 1e-12;
+		const bool sprinting = (p_input.buttons & BUTTON_SPRINT) && moving && !(p_state.flags & FLAG_EXHAUSTED);
+		const double run_speed = sprinting ? sprint_speed : speed;
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
+		bool spent = false;
 		switch (p_state.mode) {
 			case MODE_AIR:
-				_air(out, p_state, up, wish * run_speed, p_dt);
+				if ((pressed & BUTTON_JUMP) && p_state.velocity.dot(up) < glide_open_rise && _can_spend(p_state)) {
+					out.mode = MODE_GLIDE;
+					_glide(out, p_state, up, wish, p_dt);
+					spent = _spend(out, glide_cost);
+				} else {
+					_air(out, p_state, up, wish * run_speed, p_dt);
+				}
+				break;
+			case MODE_GLIDE:
+				if ((pressed & (BUTTON_JUMP | BUTTON_DROP)) || !_can_spend(p_state)) {
+					// Closed: falling again.
+					out.mode = MODE_AIR;
+					_air(out, p_state, up, wish * run_speed, p_dt);
+				} else {
+					_glide(out, p_state, up, wish, p_dt);
+					spent = _spend(out, glide_cost);
+				}
 				break;
 			case MODE_CLIMB:
-				_climb(out, p_state, forward, right, mx, my, pressed, p_dt);
+				spent = _climb(out, p_state, forward, right, mx, my, pressed, p_dt);
 				break;
-			default:
-				if (pressed & BUTTON_JUMP) {
+			default: {
+				const Vector3 vh = p_state.velocity - up * p_state.velocity.dot(up);
+				if (p_state.action == ACTION_DODGE) {
+					// Committed: the stick and buttons wait until the roll is done.
+					out.action_ticks = p_state.action_ticks + 1;
+					const double t = double(p_state.action_ticks) / double(dodge_ticks);
+					const Vector3 along = vh.length_squared() > 1e-12 ? vh.normalized() : _facing(p_state, up);
+					_ground(out, p_state, up, along * (dodge_speed + (dodge_end_speed - dodge_speed) * t), p_dt);
+					if (out.action_ticks >= dodge_ticks || out.mode != MODE_GROUND || out.velocity.length_squared() < 1e-6) {
+						out.action = ACTION_NONE;
+						out.action_ticks = 0;
+					}
+				} else if ((pressed & BUTTON_DODGE) && p_state.stamina >= dodge_cost && !(p_state.flags & FLAG_EXHAUSTED)) {
+					// A roll the way the stick points, or the way the body faces.
+					out.action = ACTION_DODGE;
+					out.action_ticks = 1;
+					const Vector3 along = moving ? wish.normalized() : _facing(p_state, up);
+					spent = _spend(out, dodge_cost);
+					_ground(out, p_state, up, along * dodge_speed, p_dt);
+				} else if (pressed & BUTTON_JUMP) {
 					out.mode = MODE_AIR;
-					out.velocity = wish * run_speed + up * jump_speed;
+					out.velocity = _ease(vh, wish * run_speed, p_dt) + up * jump_speed;
 					const WalkerState launched = out;
 					_air(out, launched, up, wish * run_speed, p_dt);
 				} else {
-					_ground(out, p_state, up, wish * run_speed, p_dt);
+					_ground(out, p_state, up, _ease(vh, wish * run_speed, p_dt), p_dt);
+					if (sprinting && out.mode == MODE_GROUND) {
+						spent = _spend(out, sprint_cost);
+					}
 				}
-				break;
+			} break;
 		}
+		if (out.mode != MODE_GROUND && out.action == ACTION_DODGE) {
+			out.action = ACTION_NONE;
+			out.action_ticks = 0;
+		}
+		_rest(out, spent);
 		out.reference = transport(north, up_at(out.position));
 		return out;
 	}
 
 private:
+	// The ground velocity eased toward the wished one: accelerating, or braking when the stick is let go
+	// or turned against the way the body goes.
+	Vector3 _ease(const Vector3 &p_velocity, const Vector3 &p_wish, double p_dt) const {
+		const Vector3 dv = p_wish - p_velocity;
+		const bool braking = p_wish.length_squared() < p_velocity.length_squared() || p_wish.dot(p_velocity) < 0.0;
+		const double most = (braking ? ground_brake : ground_accel) * p_dt;
+		if (dv.length_squared() <= most * most) {
+			return p_wish;
+		}
+		return p_velocity + dv.normalized() * most;
+	}
+
+	// The way the body faces, flat on the ground.
+	static Vector3 _facing(const WalkerState &p_state, const Vector3 &p_up) {
+		Vector3 f = -Basis(p_state.rotation).get_column(2);
+		f = f - p_up * f.dot(p_up);
+		return f.length_squared() > 1e-12 ? f.normalized() : local_north(p_up);
+	}
+
+	bool _can_spend(const WalkerState &p_state) const {
+		return p_state.stamina > 0 && !(p_state.flags & FLAG_EXHAUSTED);
+	}
+
+	// Spends stamina; empty, the walker is exhausted until it has refilled. Returns true (spent).
+	bool _spend(WalkerState &r_out, uint16_t p_amount) const {
+		r_out.stamina = p_amount >= r_out.stamina ? 0 : uint16_t(r_out.stamina - p_amount);
+		if (r_out.stamina == 0) {
+			r_out.flags |= FLAG_EXHAUSTED;
+		}
+		return true;
+	}
+
+	// After a tick: spent, rest starts again; rested, on the ground and not rolling, it refills.
+	void _rest(WalkerState &r_out, bool p_spent) const {
+		if (r_out.stamina > stamina_max) {
+			r_out.stamina = stamina_max;
+		}
+		if (p_spent) {
+			r_out.rest = stamina_rest_ticks;
+			return;
+		}
+		if (r_out.rest > 0) {
+			--r_out.rest;
+			return;
+		}
+		if (r_out.mode != MODE_GROUND || r_out.action != ACTION_NONE) {
+			return;
+		}
+		const uint32_t filled = uint32_t(r_out.stamina) + stamina_regen;
+		r_out.stamina = uint16_t(MIN(filled, uint32_t(stamina_max)));
+		if (r_out.stamina == stamina_max) {
+			r_out.flags &= ~FLAG_EXHAUSTED;
+		}
+	}
+
+	// Under the glider: the fall eased to the sink, the horizontal velocity eased toward the stick's;
+	// then the same path and landing as any flight.
+	void _glide(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_wish, double p_dt) const {
+		double vr = p_in.velocity.dot(p_up) - gravity * p_dt;
+		if (vr < -glide_sink) {
+			vr = MIN(-glide_sink, p_in.velocity.dot(p_up) + glide_brake * p_dt);
+		}
+		Vector3 vh = p_in.velocity - p_up * p_in.velocity.dot(p_up);
+		Vector3 dv = p_wish * glide_speed - vh;
+		const double most = glide_accel * p_dt;
+		if (dv.length_squared() > most * most) {
+			dv = dv.normalized() * most;
+		}
+		vh += dv;
+		_fly(r_out, p_in, p_up, vh + p_up * vr, vh, p_dt);
+	}
+
 	// Grabs whatever is in front of the body -- chest high first, then lower -- not what is at the feet:
 	// under an overhang the feet are in the crease where it meets the ground, where the surface has no
 	// one direction to climb.
@@ -611,7 +796,12 @@ private:
 			dv = dv.normalized() * max_dv;
 		}
 		vh += dv;
-		const Vector3 v = vh + p_up * (vr - gravity * p_dt);
+		_fly(r_out, p_in, p_up, vh + p_up * (vr - gravity * p_dt), vh, p_dt);
+	}
+
+	// One tick of flight at velocity v (vh its horizontal part): along the path to wherever it first
+	// meets something, and what that makes of the walker.
+	void _fly(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &v, const Vector3 &vh, double p_dt) const {
 		const Vector3 from = p_in.position;
 		const Vector3 to = from + v * p_dt;
 		if (vh.length_squared() > 1e-6) {
@@ -633,7 +823,7 @@ private:
 			r_out.velocity = vh;
 			r_out.normal = Vector3();
 			r_out.flags &= ~FLAG_NO_GRAB;
-		} else if (!(p_in.flags & FLAG_NO_GRAB) && climbable(land)) {
+		} else if (!(p_in.flags & (FLAG_NO_GRAB | FLAG_EXHAUSTED)) && climbable(land)) {
 			r_out.mode = MODE_CLIMB;
 			r_out.position = land;
 			r_out.velocity = Vector3();
@@ -666,7 +856,8 @@ private:
 		return ahead * p_my + side * p_mx;
 	}
 
-	void _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_forward, const Vector3 &p_right, double p_mx, double p_my, uint8_t p_pressed, double p_dt) const {
+	// Returns whether stamina was spent.
+	bool _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_forward, const Vector3 &p_right, double p_mx, double p_my, uint8_t p_pressed, double p_dt) const {
 		const Vector3 here = p_in.position;
 		const Vector3 up = up_at(here);
 		Vector3 n = p_in.normal;
@@ -674,13 +865,14 @@ private:
 			n = up;
 		}
 		r_out.rotation = facing_rotation(face_forward(n, up, p_forward), up);
-		if (p_pressed & BUTTON_DROP) {
+		if ((p_pressed & BUTTON_DROP) || (p_in.flags & FLAG_EXHAUSTED)) {
+			// Let go -- or out of stamina, which lets go for you.
 			r_out.mode = MODE_AIR;
 			r_out.flags |= FLAG_NO_GRAB;
 			r_out.dash = 0;
 			r_out.position = here + n * 0.05;
 			r_out.velocity = n;
-			return;
+			return false;
 		}
 		if ((p_pressed & BUTTON_JUMP) && p_my < 0.0) {
 			// Jump with back held: leap off.
@@ -688,11 +880,13 @@ private:
 			r_out.dash = 0;
 			r_out.position = here + n * 0.05;
 			r_out.velocity = up * jump_speed * 0.8 + n * 4.0;
-			return;
+			return false;
 		}
-		if ((p_pressed & BUTTON_JUMP) && p_in.dash == 0) {
+		bool spent = false;
+		if ((p_pressed & BUTTON_JUMP) && p_in.dash == 0 && p_in.stamina >= climb_jump_cost) {
 			// A climb jump: a lunge along the face, the way the stick points (onward if it points nowhere).
 			r_out.dash = dash_ticks;
+			spent = _spend(r_out, climb_jump_cost);
 		}
 		double my = p_my;
 		double amount = MIN(Vector2(p_mx, p_my).length(), 1.0);
@@ -709,9 +903,12 @@ private:
 		r_out.velocity = Vector3();
 		Vector3 dir = climb_direction(n, up, p_forward, p_right, p_mx, my);
 		if (amount < 1e-9 || dir.length_squared() < 1e-6) {
-			return;
+			return spent;
 		}
 		dir = dir.normalized();
+		if (p_in.dash == 0) {
+			spent = _spend(r_out, climb_cost);
+		}
 		// Along the face, then back onto it -- in pieces no longer than a probe's reach is safe for.
 		const double total = rate * amount * p_dt;
 		const int pieces = int(Math::ceil(total / 0.1));
@@ -766,6 +963,7 @@ private:
 				}
 			}
 		}
+		return spent;
 	}
 };
 
