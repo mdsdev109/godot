@@ -137,9 +137,12 @@ inline uint8_t pose_of(const WalkerState &p_state) {
 //
 // Down is toward `gravity_centre` (a planet), or along `uniform_down` when that is set (a level).
 struct Walker {
-	double speed = 5.0;
-	double sprint_speed = 9.0;
-	// BotW pace: a hand over hand a little under a second (planet-demo assets/character/authored).
+	// Breath of the Wild's (planet-demo docs/CHARACTER.md): a run of 5.5 m/s and a sprint of 8,
+	// unboosted. Its climb is 0.7 m/s, but at that speed a climber leaving the sunk underside of a ball
+	// resting in the ground can come off below the ground and fall through it (planet-demo
+	// tests/character_checks.gd, the online pit and ball): 1.2 until the walker is fixed.
+	double speed = 5.5;
+	double sprint_speed = 8.0;
 	double climb_speed = 1.2;
 	double jump_speed = 7.0;
 	double gravity = 20.0;
