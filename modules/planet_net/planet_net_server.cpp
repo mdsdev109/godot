@@ -614,6 +614,22 @@ void PlanetNetServer::_acknowledge(Client &r_client, uint32_t p_seq) {
 void PlanetNetServer::_step() {
 	++tick;
 	const double dt = 1.0 / TICK_HZ;
+	// The solid bodies as they stand before anyone moves this tick; each walker steps against the others.
+	LocalVector<uint64_t> solid_ids;
+	LocalVector<Vector3> solid_feet;
+	LocalVector<double> solid_radii;
+	if (!solid_types.is_empty()) {
+		for (const KeyValue<uint64_t, Entity> &E : entities) {
+			const double *r = solid_types.getptr(int(E.value.state.type));
+			if (r != nullptr) {
+				solid_ids.push_back(E.key);
+				// Where the clients have it: through the wire's rounding, so a prediction against a body
+				// that stands still is exact.
+				solid_feet.push_back(Wire::encode(E.value.state, regions).decode(E.key, regions).position);
+				solid_radii.push_back(*r);
+			}
+		}
+	}
 	for (KeyValue<int, Client> &C : clients) {
 		Client &client = C.value;
 		Entity *e = client.entity != 0 ? entities.getptr(client.entity) : nullptr;
@@ -636,6 +652,14 @@ void PlanetNetServer::_step() {
 			++client.view_tick; // a repeated input: the screen moved on a tick too
 		}
 		client.input_views.erase(tick);
+		walker.body_feet.clear();
+		walker.body_radii.clear();
+		for (uint32_t k = 0; k < solid_ids.size(); ++k) {
+			if (solid_ids[k] != client.entity && solid_feet[k].distance_squared_to(e->state.position) < 100.0) {
+				walker.body_feet.push_back(solid_feet[k]);
+				walker.body_radii.push_back(solid_radii[k]);
+			}
+		}
 		const WalkerState s = walker.step(walker_state(*e), client.last_input, dt);
 		store_walker_state(*e, s);
 		// Reported even before any input arrives, so the client starts predicting from the exact state.
@@ -646,6 +670,8 @@ void PlanetNetServer::_step() {
 		client.applied_arrived[slot] = arrived != nullptr;
 		client.applied_position[slot] = s.position;
 	}
+	walker.body_feet.clear();
+	walker.body_radii.clear();
 	_resolve_swings();
 	for (KeyValue<uint64_t, Entity> &E : entities) {
 		_record_history(E.value);
@@ -1404,6 +1430,8 @@ void PlanetNetServer::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));
 	ClassDB::bind_method(D_METHOD("set_entity_health", "id", "health_max"), &PlanetNetServer::set_entity_health);
+	ClassDB::bind_method(D_METHOD("set_solid_type", "type", "radius"), &PlanetNetServer::set_solid_type);
+	ClassDB::bind_method(D_METHOD("get_solid_types"), &PlanetNetServer::get_solid_types);
 	ClassDB::bind_method(D_METHOD("get_entity_health", "id"), &PlanetNetServer::get_entity_health);
 	ClassDB::bind_method(D_METHOD("get_entity_health_max", "id"), &PlanetNetServer::get_entity_health_max);
 	ClassDB::bind_method(D_METHOD("get_entity_action", "id"), &PlanetNetServer::get_entity_action);

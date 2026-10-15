@@ -69,6 +69,16 @@ public:
 		walker.carve_centres.push_back(p_centre);
 		walker.carve_radii.push_back(p_radius);
 	}
+	// Other bodies it cannot walk through (Walker::body_feet): where one stands, and its radius. Set
+	// them again before each step as they move.
+	void add_body(const Vector3 &p_feet, double p_radius) {
+		walker.body_feet.push_back(p_feet);
+		walker.body_radii.push_back(p_radius);
+	}
+	void clear_bodies() {
+		walker.body_feet.clear();
+		walker.body_radii.clear();
+	}
 	void clear_carves() {
 		walker.carve_centres.clear();
 		walker.carve_radii.clear();

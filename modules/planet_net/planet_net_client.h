@@ -127,6 +127,8 @@ private:
 	uint8_t teleports_requested = 0;
 	uint64_t look = 0;
 	void _send_look();
+	HashMap<int, double> solid_types;
+	void _gather_bodies();
 	bool teleport_restart = false;
 	uint32_t last_confirmed_tick = 0;
 	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
@@ -167,6 +169,23 @@ public:
 	void request_teleport(const Vector3 &p_point);
 	// How our player is drawn to everyone else (EntityState::look): sent now if connected, and again on
 	// every welcome, so a reconnect keeps it. 0 sends nothing.
+	// Bodies the walkers cannot pass through (Walker::body_feet): entities of these types, each type its
+	// radius. Server and clients must name the same, or a client predicts walking through what the
+	// server stops it at. The game sets them (players, its training dummy); none by default.
+	void set_solid_type(int p_type, double p_radius) {
+		if (p_radius > 0.0) {
+			solid_types[p_type] = p_radius;
+		} else {
+			solid_types.erase(p_type);
+		}
+	}
+	Dictionary get_solid_types() const {
+		Dictionary d;
+		for (const KeyValue<int, double> &E : solid_types) {
+			d[E.key] = E.value;
+		}
+		return d;
+	}
 	void set_look(int64_t p_look);
 	int64_t get_look() const { return int64_t(look); }
 

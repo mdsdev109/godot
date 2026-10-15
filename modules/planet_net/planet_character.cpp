@@ -95,6 +95,8 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_action_ticks"), &PlanetCharacter::get_action_ticks);
 	ClassDB::bind_method(D_METHOD("is_invulnerable"), &PlanetCharacter::is_invulnerable);
 	ClassDB::bind_method(D_METHOD("is_hitting"), &PlanetCharacter::is_hitting);
+	ClassDB::bind_method(D_METHOD("add_body", "feet", "radius"), &PlanetCharacter::add_body);
+	ClassDB::bind_method(D_METHOD("clear_bodies"), &PlanetCharacter::clear_bodies);
 	ClassDB::bind_method(D_METHOD("swing_reaches", "feet", "radius"), &PlanetCharacter::swing_reaches);
 	ClassDB::bind_method(D_METHOD("guards", "from"), &PlanetCharacter::guards);
 	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);

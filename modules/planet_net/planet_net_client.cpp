@@ -185,8 +185,31 @@ void PlanetNetClient::poll(double p_delta) {
 		_send_ping();
 	}
 	if (welcomed && clock_valid) {
+		_gather_bodies();
 		_advance_prediction(p_delta);
 		_send_input();
+	}
+}
+
+// The solid bodies for prediction (Walker::body_feet): every other entity of a solid type, where its
+// newest state has it. Not where the server will have it at the predicted tick, which nobody here
+// knows: touching another body, a prediction can be corrected.
+void PlanetNetClient::_gather_bodies() {
+	walker.body_feet.clear();
+	walker.body_radii.clear();
+	if (solid_types.is_empty()) {
+		return;
+	}
+	for (const KeyValue<uint64_t, Tracked> &E : tracked) {
+		if (E.key == local_entity || E.value.samples.is_empty()) {
+			continue;
+		}
+		const EntityState &st = E.value.samples[E.value.samples.size() - 1].state;
+		const double *r = solid_types.getptr(int(st.type));
+		if (r != nullptr && st.position.distance_squared_to(predicted.position) < 100.0) {
+			walker.body_feet.push_back(st.position);
+			walker.body_radii.push_back(*r);
+		}
 	}
 }
 
@@ -711,6 +734,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetNetClient::clear_excludes);
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
 	ClassDB::bind_method(D_METHOD("set_look", "look"), &PlanetNetClient::set_look);
+	ClassDB::bind_method(D_METHOD("set_solid_type", "type", "radius"), &PlanetNetClient::set_solid_type);
+	ClassDB::bind_method(D_METHOD("get_solid_types"), &PlanetNetClient::get_solid_types);
 	ClassDB::bind_method(D_METHOD("get_look"), &PlanetNetClient::get_look);
 	ClassDB::bind_method(D_METHOD("get_entity_look", "id"), &PlanetNetClient::get_entity_look);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);

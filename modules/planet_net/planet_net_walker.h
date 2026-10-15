@@ -238,6 +238,14 @@ struct Walker {
 	// for predictions to match.
 	LocalVector<Vector3> carve_centres;
 	LocalVector<double> carve_radii;
+	// Other bodies -- players, a training dummy -- that this walker cannot walk through: where each
+	// stands (its feet) and its radius, set before each step by whoever steps it (the server from its
+	// entities, a client from the newest it has of them, a game offline from its own). An upright
+	// cylinder BODY_HEIGHT tall round each.
+	LocalVector<Vector3> body_feet;
+	LocalVector<double> body_radii;
+	static constexpr double BODY_HEIGHT = 1.8;
+	static constexpr double BODY_SEPARATE = 2.0; // m/s at most, pushing apart bodies that overlap
 	// Shells: solid between an inner and an outer radius about a centre. Inner 0 is a ball. Not cut by
 	// carves.
 	LocalVector<Vector3> shell_centres;
@@ -905,7 +913,45 @@ private:
 		return false;
 	}
 
-	void _ground(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_velocity, double p_dt) const {
+	// A velocity along the ground kept out of the other bodies: what would take it into one this tick
+	// taken off, so it arrives touching and slides round, and one it overlaps pushed apart, over a tick
+	// at most BODY_SEPARATE.
+	Vector3 _round_bodies(const Vector3 &p_feet, const Vector3 &p_up, const Vector3 &p_velocity, double p_dt) const {
+		Vector3 v = p_velocity;
+		for (uint32_t i = 0; i < body_feet.size(); ++i) {
+			const Vector3 d = p_feet - body_feet[i];
+			const double dv = d.dot(p_up);
+			if (dv > BODY_HEIGHT || dv < -BODY_HEIGHT) {
+				continue;
+			}
+			Vector3 dh = d - p_up * dv;
+			const double reach = body_radius + body_radii[i];
+			const double dist = dh.length();
+			// Within a tick's travel of touching: closer than that, it arrives touching, not inside.
+			if (dist >= reach + v.length() * p_dt + 0.02) {
+				continue;
+			}
+			if (dist < 1e-6) {
+				// Exactly on top of it: out the way it was going, or any way.
+				dh = v.length_squared() > 1e-12 ? -v : Walker::local_north(p_up);
+				dh -= p_up * dh.dot(p_up);
+			}
+			const Vector3 out = dh.normalized();
+			const double into = v.dot(out);
+			const double allowed = MAX(dist - reach, 0.0) / p_dt; // m/s of approach that just touches
+			if (into < -allowed) {
+				v -= out * (into + allowed);
+			}
+			const double overlap = reach - dist;
+			if (overlap > 0.0) {
+				v += out * MIN(overlap / p_dt, BODY_SEPARATE);
+			}
+		}
+		return v;
+	}
+
+	void _ground(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &p_velocity_in, double p_dt) const {
+		const Vector3 p_velocity = body_feet.is_empty() ? p_velocity_in : _round_bodies(p_in.position, p_up, p_velocity_in, p_dt);
 		// Still standing? The ground can be dug out from under a walker, or a platform end.
 		Vector3 here;
 		if (!cast(p_in.position + p_up * 0.3, p_in.position - p_up * 0.3, here)) {
@@ -976,6 +1022,9 @@ private:
 			dv = dv.normalized() * max_dv;
 		}
 		vh += dv;
+		if (!body_feet.is_empty()) {
+			vh = _round_bodies(p_in.position, p_up, vh, p_dt);
+		}
 		_fly(r_out, p_in, p_up, vh + p_up * (vr - gravity * p_dt), vh, p_dt);
 	}
 

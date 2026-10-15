@@ -180,6 +180,7 @@ private:
 	HashMap<uint64_t, Entity> entities;
 	bool allow_teleport = true;
 	bool player_hits = false;
+	HashMap<int, double> solid_types;
 	int32_t player_health = 100;
 	uint64_t hits_resolved = 0;
 	HashMap<uint32_t, LocalVector<uint64_t>> region_index;
@@ -338,6 +339,24 @@ public:
 	int get_entity_action(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->walk.action) : 0;
+	}
+
+	// Bodies the walkers cannot pass through (Walker::body_feet): entities of these types, each type its
+	// radius. Server and clients must name the same, or a client predicts walking through what the
+	// server stops it at. The game sets them (players, its training dummy); none by default.
+	void set_solid_type(int p_type, double p_radius) {
+		if (p_radius > 0.0) {
+			solid_types[p_type] = p_radius;
+		} else {
+			solid_types.erase(p_type);
+		}
+	}
+	Dictionary get_solid_types() const {
+		Dictionary d;
+		for (const KeyValue<int, double> &E : solid_types) {
+			d[E.key] = E.value;
+		}
+		return d;
 	}
 
 	// Whether hits pass through the entity this tick (a player mid-dodge).
