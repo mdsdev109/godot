@@ -137,13 +137,11 @@ inline uint8_t pose_of(const WalkerState &p_state) {
 //
 // Down is toward `gravity_centre` (a planet), or along `uniform_down` when that is set (a level).
 struct Walker {
-	// Breath of the Wild's (planet-demo docs/CHARACTER.md): a run of 5.5 m/s and a sprint of 8,
-	// unboosted. Its climb is 0.7 m/s, but at that speed a climber leaving the sunk underside of a ball
-	// resting in the ground can come off below the ground and fall through it (planet-demo
-	// tests/character_checks.gd, the online pit and ball): 1.2 until the walker is fixed.
+	// Breath of the Wild's (planet-demo docs/CHARACTER.md): a run of 5.5 m/s, a sprint of 8, climbing
+	// at 0.7 -- unboosted.
 	double speed = 5.5;
 	double sprint_speed = 8.0;
-	double climb_speed = 1.2;
+	double climb_speed = 0.7;
 	double jump_speed = 7.0;
 	double gravity = 20.0;
 	double air_accel = 6.0;
@@ -806,6 +804,19 @@ private:
 	// meets something, and what that makes of the walker.
 	void _fly(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_up, const Vector3 &v, const Vector3 &vh, double p_dt) const {
 		const Vector3 from = p_in.position;
+		// Inside the ground, however it got there: no path from in there meets anything, and the walker
+		// would fall forever. Put it on the ground above it. Only when well in (5 cm): a walker standing
+		// on the ground, as one is on the tick it jumps, is on its surface, and counted inside by a hair.
+		if (has_analytic() && inside(from) && inside(from + p_up * 0.05)) {
+			Vector3 top;
+			if (cast(from + p_up * 50.0, from, top)) {
+				r_out.mode = MODE_GROUND;
+				r_out.position = top;
+				r_out.velocity = vh;
+				r_out.normal = Vector3();
+				return;
+			}
+		}
 		const Vector3 to = from + v * p_dt;
 		if (vh.length_squared() > 1e-6) {
 			r_out.rotation = facing_rotation(vh.normalized(), p_up);
@@ -834,11 +845,32 @@ private:
 			r_out.rotation = facing_rotation(face_forward(n, land_up, vh), land_up);
 		} else {
 			// Not holding on: slide down the face, keeping what of the velocity runs along it, just off
-			// it so the next tick's path starts outside and can meet it again.
+			// it so the next tick's path starts outside and can meet it again -- off along the face's
+			// normal, or, where that is inside other ground, along its level part or straight up. Below
+			// a ball's equator the normal points down, and where the ball is sunk into the ground the
+			// step off it along that ended inside the ground: a path from inside it meets nothing, and the
+			// walker fell through the planet (a slow climber let go there, out of stamina).
 			r_out.mode = MODE_AIR;
 			r_out.velocity = v - n * MIN(v.dot(n), 0.0);
-			r_out.position = land + n * 0.02;
+			r_out.position = _outside(land, n, land_up);
 		}
+	}
+
+	// A point just off a surface at p_on and outside all ground: off along p_normal, else its level part,
+	// else straight up, else p_on itself.
+	Vector3 _outside(const Vector3 &p_on, const Vector3 &p_normal, const Vector3 &p_up) const {
+		if (!has_analytic()) {
+			return p_on + p_normal * 0.02;
+		}
+		Vector3 level = p_normal - p_up * p_normal.dot(p_up);
+		const Vector3 offs[3] = { p_normal, level.length_squared() > 1e-6 ? level.normalized() : p_up, p_up };
+		for (int k = 0; k < 3; ++k) {
+			const Vector3 q = p_on + offs[k] * 0.02;
+			if (!inside(q)) {
+				return q;
+			}
+		}
+		return p_on;
 	}
 
 	// Climbing input. Forward is up the face -- up flattened onto it, whichever way the face leans, so on
