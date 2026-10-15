@@ -57,7 +57,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 9;
+constexpr uint16_t PROTOCOL_VERSION = 10;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -76,6 +76,7 @@ enum MessageType : uint8_t {
 	//               u16 n, n x record,
 	//               u16 m, m x u16 removed handle
 	MSG_TELEPORT, // client -> server, control: f64 x3 point. Put me on the ground there (if allowed).
+	MSG_LOOK, // client -> server, control: u64 look. How my player is drawn (EntityState::look).
 };
 
 // Ids carry the server that created them in the top 16 bits, so they stay unique across servers.
@@ -97,6 +98,9 @@ struct EntityState {
 	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | action << 4); 0 for
 	// anything that is not a player.
 	uint8_t pose = 0;
+	// How a player is drawn: what it chose (the game packs its body, clothes and colours into it,
+	// CharacterAvatar.pack_look); the server keeps it and passes it on without reading it. 0: unset.
+	uint64_t look = 0;
 };
 
 // ---------------------------------------------------------------- regions
@@ -196,6 +200,7 @@ struct Wire {
 	uint32_t rotation = 0;
 	uint16_t velocity[3] = { 0, 0, 0 };
 	uint8_t pose = 0;
+	uint64_t look = 0;
 
 	static Wire encode(const EntityState &p_state, const Regions &p_regions) {
 		Wire w;
@@ -211,6 +216,7 @@ struct Wire {
 		w.velocity[1] = Math::make_half_float(float(p_state.velocity.y));
 		w.velocity[2] = Math::make_half_float(float(p_state.velocity.z));
 		w.pose = p_state.pose;
+		w.look = p_state.look;
 		return w;
 	}
 
@@ -223,6 +229,7 @@ struct Wire {
 		s.rotation = unpack_rotation(rotation);
 		s.velocity = Vector3(Math::half_to_float(velocity[0]), Math::half_to_float(velocity[1]), Math::half_to_float(velocity[2]));
 		s.pose = pose;
+		s.look = look;
 		return s;
 	}
 };
@@ -239,6 +246,7 @@ enum RecordFlags : uint8_t {
 	RECORD_ROTATION = 1 << 3,
 	RECORD_VELOCITY = 1 << 4,
 	RECORD_POSE = 1 << 5,
+	RECORD_LOOK = 1 << 6, // only when it changes: a look is chosen once
 };
 
 // ---------------------------------------------------------------- byte streams
@@ -275,7 +283,7 @@ public:
 	bool record(uint16_t p_handle, uint64_t p_id, const Wire &p_now, const Wire *p_base, uint8_t p_age) {
 		uint8_t flags = 0;
 		if (p_base == nullptr) {
-			flags = RECORD_FULL | RECORD_KIND | RECORD_POSITION | RECORD_ROTATION | RECORD_VELOCITY | RECORD_POSE;
+			flags = RECORD_FULL | RECORD_KIND | RECORD_POSITION | RECORD_ROTATION | RECORD_VELOCITY | RECORD_POSE | RECORD_LOOK;
 		} else {
 			if (p_now.type != p_base->type || p_now.frame != p_base->frame) {
 				flags |= RECORD_KIND;
@@ -291,6 +299,9 @@ public:
 			}
 			if (p_now.pose != p_base->pose) {
 				flags |= RECORD_POSE;
+			}
+			if (p_now.look != p_base->look) {
+				flags |= RECORD_LOOK;
 			}
 			if (flags == 0) {
 				return false;
@@ -323,6 +334,9 @@ public:
 		}
 		if (flags & RECORD_POSE) {
 			u8(p_now.pose);
+		}
+		if (flags & RECORD_LOOK) {
+			u64(p_now.look);
 		}
 		return true;
 	}
@@ -388,6 +402,9 @@ public:
 		}
 		if (p_flags & RECORD_POSE) {
 			r_wire.pose = u8();
+		}
+		if (p_flags & RECORD_LOOK) {
+			r_wire.look = u64();
 		}
 	}
 

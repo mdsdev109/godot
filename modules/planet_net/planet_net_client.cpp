@@ -104,6 +104,23 @@ void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw, int p_button
 	input.buttons = uint8_t(p_buttons);
 }
 
+void PlanetNetClient::set_look(int64_t p_look) {
+	look = uint64_t(p_look);
+	if (welcomed) {
+		_send_look();
+	}
+}
+
+void PlanetNetClient::_send_look() {
+	if (look == 0) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_LOOK);
+	w.u64(look);
+	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
 void PlanetNetClient::request_teleport(const Vector3 &p_point) {
 	if (!welcomed) {
 		return;
@@ -401,6 +418,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			walker.radius = region_radius;
 			walker.speed = walk_speed;
 			welcomed = true;
+			_send_look();
 			emit_signal(SNAME("connected"), int64_t(entity));
 		} break;
 		case MSG_WORLD_CHANGE: {
@@ -640,6 +658,11 @@ int PlanetNetClient::get_entity_pose(int64_t p_id) const {
 	return _sample(uint64_t(p_id), e) ? int(e.pose) : 0;
 }
 
+int64_t PlanetNetClient::get_entity_look(int64_t p_id) const {
+	EntityState e;
+	return _sample(uint64_t(p_id), e) ? int64_t(e.look) : 0;
+}
+
 Dictionary PlanetNetClient::get_stats() const {
 	Dictionary d;
 	d["connected"] = welcomed;
@@ -668,6 +691,9 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_exclude", "body"), &PlanetNetClient::add_exclude);
 	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetNetClient::clear_excludes);
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
+	ClassDB::bind_method(D_METHOD("set_look", "look"), &PlanetNetClient::set_look);
+	ClassDB::bind_method(D_METHOD("get_look"), &PlanetNetClient::get_look);
+	ClassDB::bind_method(D_METHOD("get_entity_look", "id"), &PlanetNetClient::get_entity_look);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
 	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
 	ClassDB::bind_method(D_METHOD("get_predicted_stamina"), &PlanetNetClient::get_predicted_stamina);

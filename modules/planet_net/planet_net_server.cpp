@@ -411,6 +411,14 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			}
 			store_walker_state(*e, walker.place(walker_state(*e), point));
 		} break;
+		case MSG_LOOK: {
+			const uint64_t look = r.u64();
+			Entity *e = client->entity != 0 ? entities.getptr(client->entity) : nullptr;
+			if (!r.ok() || e == nullptr) {
+				return;
+			}
+			e->state.look = look;
+		} break;
 		case MSG_INPUT: {
 			const uint32_t newest = r.u32();
 			const uint32_t bits = r.u32();

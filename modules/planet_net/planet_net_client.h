@@ -124,6 +124,8 @@ private:
 	// Teleports asked for, mod 256. Word about our player from before the server applied the latest is
 	// ignored; the first from after it restarts prediction (see request_teleport).
 	uint8_t teleports_requested = 0;
+	uint64_t look = 0;
+	void _send_look();
 	bool teleport_restart = false;
 	uint32_t last_confirmed_tick = 0;
 	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
@@ -162,6 +164,10 @@ public:
 	// Asks the server to put our player on the ground at a point (PlanetNetServer::allow_teleport).
 	// The prediction moves there at once.
 	void request_teleport(const Vector3 &p_point);
+	// How our player is drawn to everyone else (EntityState::look): sent now if connected, and again on
+	// every welcome, so a reconnect keeps it. 0 sends nothing.
+	void set_look(int64_t p_look);
+	int64_t get_look() const { return int64_t(look); }
 
 	int64_t get_local_entity_id() const { return int64_t(local_entity); }
 	double get_server_time_estimate() const { return server_time; }
@@ -257,6 +263,8 @@ public:
 	Vector3 get_entity_velocity(int64_t p_id) const;
 	// What the entity's body is doing (PlanetNet::pose_of: walk mode | action << 4).
 	int get_entity_pose(int64_t p_id) const;
+	// The look the entity's player chose (set_look), 0 if none has reached us.
+	int64_t get_entity_look(int64_t p_id) const;
 
 	Dictionary get_stats() const;
 
