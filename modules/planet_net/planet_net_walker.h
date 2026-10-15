@@ -208,14 +208,14 @@ struct Walker {
 	uint8_t light_hit_to = 14;
 	uint8_t light_chain_from = 13; // a light pressed from here on starts the next of the combo
 	uint16_t light_cost = 60;
-	double light_lunge = 2.5; // m/s along the facing, ticks 3 to the window's end
+	double light_lunge = 1.5; // m/s along the facing, ticks 3 to the window's end: half a metre
 	double light_reach = 2.0; // from the attacker's centre to the target's surface
 	double light_arc = 60.0; // degrees either side of the facing
 	uint8_t heavy_ticks = 36;
 	uint8_t heavy_hit_from = 14;
 	uint8_t heavy_hit_to = 20;
 	uint16_t heavy_cost = 150;
-	double heavy_lunge = 3.0; // m/s, ticks 9 to the window's end
+	double heavy_lunge = 2.0; // m/s, ticks 9 to the window's end
 	double heavy_reach = 2.4;
 	double heavy_arc = 80.0;
 	double swing_height = 1.6; // a target's feet this far above or below the attacker's still reach
