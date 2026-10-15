@@ -208,6 +208,7 @@ void PlanetNetClient::_advance_prediction(double p_delta) {
 		f.tick = predicted_tick;
 		f.input = input;
 		f.state = predicted;
+		f.view = uint32_t(MAX(get_render_time(), 0.0));
 		frames.push_back(f);
 	}
 	while (frames.size() > PREDICTION_FRAMES) {
@@ -389,6 +390,7 @@ void PlanetNetClient::_send_input() {
 		w.f32(frames[i].input.move.y);
 		w.f32(frames[i].input.yaw);
 		w.u8(frames[i].input.buttons);
+		w.u32(frames[i].view);
 	}
 	link.send(server_peer, CHANNEL_STATE, w.data(), false);
 }
@@ -420,6 +422,23 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			welcomed = true;
 			_send_look();
 			emit_signal(SNAME("connected"), int64_t(entity));
+		} break;
+		case MSG_HIT: {
+			Dictionary hit;
+			hit["attacker"] = int64_t(r.u64());
+			hit["target"] = int64_t(r.u64());
+			hit["result"] = int(r.u8());
+			hit["attack"] = int(r.u8());
+			hit["damage"] = int(r.u16());
+			hit["health"] = int(r.u16());
+			Vector3 point;
+			point.x = r.f64();
+			point.y = r.f64();
+			point.z = r.f64();
+			hit["point"] = point;
+			if (r.ok()) {
+				emit_signal(SNAME("hit"), hit);
+			}
 		} break;
 		case MSG_WORLD_CHANGE: {
 			const uint64_t id = r.u64();
@@ -747,4 +766,7 @@ void PlanetNetClient::_bind_methods() {
 			PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));
 	ClassDB::bind_method(D_METHOD("send_world_change", "point", "data"), &PlanetNetClient::send_world_change);
 	ADD_SIGNAL(MethodInfo("disconnected"));
+	// A swing the server judged, involving something this client sees: {attacker, target, result
+	// (PlanetNet::HitResult: 1 struck, 2 blocked, 3 guard broken, 4 dodged), attack, damage, health, point}.
+	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));
 }

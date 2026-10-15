@@ -94,6 +94,10 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_action"), &PlanetCharacter::get_action);
 	ClassDB::bind_method(D_METHOD("get_action_ticks"), &PlanetCharacter::get_action_ticks);
 	ClassDB::bind_method(D_METHOD("is_invulnerable"), &PlanetCharacter::is_invulnerable);
+	ClassDB::bind_method(D_METHOD("is_hitting"), &PlanetCharacter::is_hitting);
+	ClassDB::bind_method(D_METHOD("swing_reaches", "feet", "radius"), &PlanetCharacter::swing_reaches);
+	ClassDB::bind_method(D_METHOD("guards", "from"), &PlanetCharacter::guards);
+	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");

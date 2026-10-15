@@ -242,6 +242,135 @@ PackedInt64Array PlanetNetServer::get_client_view(int p_peer) const {
 	return ids;
 }
 
+void PlanetNetServer::set_entity_health(int64_t p_id, int p_health_max) {
+	Entity *e = entities.getptr(uint64_t(p_id));
+	ERR_FAIL_NULL(e);
+	e->health_max = MAX(p_health_max, 0);
+	e->health = e->health_max;
+}
+
+void PlanetNetServer::_resolve_swings() {
+	for (KeyValue<uint64_t, Entity> &T : entities) {
+		Entity &t = T.value;
+		// Reactions run out; health comes back after a rest.
+		if (t.react > 0 && --t.react == 0) {
+			t.state.pose = 0;
+		}
+		if (t.health_max > 0 && t.health < t.health_max && tick - t.hurt_tick > uint32_t(HEALTH_REST_TICKS)) {
+			t.health = t.health_max;
+		}
+	}
+	for (KeyValue<int, Client> &C : clients) {
+		Client &client = C.value;
+		Entity *a = client.entity != 0 ? entities.getptr(client.entity) : nullptr;
+		if (a == nullptr || !walker.hitting(a->walk)) {
+			continue;
+		}
+		const uint32_t start = tick - a->walk.action_ticks;
+		if (a->swing_start != start) {
+			a->swing_start = start;
+			a->swing_hits.clear();
+		}
+		// Where the others were on this player's screen when it swung: its view, at most LAG_TICKS back.
+		const uint32_t view = client.view_tick != 0 ? client.view_tick : tick;
+		const double at = double(MAX(view, tick > uint32_t(LAG_TICKS) ? tick - uint32_t(LAG_TICKS) : 0u));
+		const WalkerState swing = walker_state(*a);
+		for (KeyValue<uint64_t, Entity> &T : entities) {
+			Entity &t = T.value;
+			if (T.key == client.entity || t.health_max <= 0 || (t.state.type == ENTITY_TYPE_PLAYER && !player_hits)) {
+				continue;
+			}
+			if (a->swing_hits.has(T.key)) {
+				continue;
+			}
+			// Far off now is far off then too (the rewind is under a second): skip the history.
+			if (t.state.position.distance_squared_to(a->state.position) > 100.0) {
+				continue;
+			}
+			const Vector3 then = get_entity_position_at(int64_t(T.key), at);
+			if (!walker.swing_reaches(swing, then, TARGET_RADIUS)) {
+				continue;
+			}
+			a->swing_hits.push_back(T.key);
+			_strike(client.entity, *a, T.key, t, then);
+		}
+	}
+}
+
+void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at) {
+	const uint8_t attack = r_attacker.walk.action;
+	const bool heavy = attack == ACTION_HEAVY;
+	const bool walks = r_target.state.type == ENTITY_TYPE_PLAYER;
+	const Vector3 up = walker.up_at(r_target.state.position);
+	Vector3 away = r_target.state.position - r_attacker.state.position;
+	away -= up * away.dot(up);
+	away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
+	uint8_t result = HIT_STRUCK;
+	int damage = 0;
+	if (walks && walker.invulnerable(r_target.walk)) {
+		result = HIT_DODGED;
+	} else if (walks && walker.guards(r_target.walk, r_attacker.state.position)) {
+		const uint16_t cost = uint16_t(heavy ? HEAVY_GUARD_COST : LIGHT_GUARD_COST);
+		WalkerState ts = walker_state(r_target);
+		if (ts.stamina >= cost) {
+			ts.stamina = uint16_t(ts.stamina - cost);
+			ts.rest = walker.stamina_rest_ticks;
+			result = HIT_BLOCKED;
+			store_walker_state(r_target, walker.recoil(ts, away * (heavy ? 3.0 : 2.0), true));
+		} else {
+			ts.stamina = 0;
+			ts.flags |= FLAG_EXHAUSTED;
+			result = HIT_GUARD_BROKEN;
+			store_walker_state(r_target, walker.recoil(ts, away * 4.0, false));
+		}
+	} else {
+		damage = heavy ? HEAVY_DAMAGE : LIGHT_DAMAGE;
+		r_target.health = MAX(0, r_target.health - damage);
+		r_target.hurt_tick = tick;
+		if (walks) {
+			store_walker_state(r_target, walker.recoil(walker_state(r_target), away * (heavy ? 5.0 : 3.0), false));
+		} else {
+			r_target.react = walker.stagger_ticks;
+			r_target.state.pose = uint8_t(ACTION_STAGGER << 4);
+		}
+	}
+	++hits_resolved;
+	Writer w;
+	w.u8(MSG_HIT);
+	w.u64(p_attacker);
+	w.u64(p_target);
+	w.u8(result);
+	w.u8(attack);
+	w.u16(uint16_t(damage));
+	w.u16(uint16_t(MAX(0, r_target.health)));
+	w.f64(p_at.x);
+	w.f64(p_at.y);
+	w.f64(p_at.z);
+	// To each client that sees either end, and to both.
+	for (KeyValue<int, Client> &C : clients) {
+		const Client &c = C.value;
+		if (!c.welcomed) {
+			continue;
+		}
+		const View *seen_target = c.views.getptr(p_target);
+		const View *seen_attacker = c.views.getptr(p_attacker);
+		if (c.entity == p_attacker || c.entity == p_target || (seen_target != nullptr && !seen_target->removing) ||
+				(seen_attacker != nullptr && !seen_attacker->removing)) {
+			link.send(C.key, CHANNEL_CONTROL, w.data(), true);
+		}
+	}
+	Dictionary hit;
+	hit["attacker"] = int64_t(p_attacker);
+	hit["target"] = int64_t(p_target);
+	hit["result"] = int(result);
+	hit["attack"] = int(attack);
+	hit["damage"] = damage;
+	hit["health"] = int(r_target.health);
+	hit["point"] = p_at;
+	hit["tick"] = int(tick);
+	emit_signal(SNAME("hit"), hit);
+}
+
 void PlanetNetServer::_record_history(Entity &r_entity) {
 	const int i = int(tick % HISTORY_TICKS);
 	r_entity.history[i] = r_entity.state.position;
@@ -353,6 +482,8 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			Entity &player = entities[uint64_t(id)];
 			player.owner_peer = p_peer;
 			player.persistent = false;
+			player.health_max = player_health;
+			player.health = player_health;
 			client->entity = uint64_t(id);
 			client->player_key = key;
 			client->welcomed = true;
@@ -443,8 +574,10 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				in.move.y = r.f32();
 				in.yaw = r.f32();
 				in.buttons = r.u8();
+				const uint32_t view = r.u32();
 				if (r.ok() && input_tick > tick && input_tick <= tick + 4 * TICK_HZ) {
 					client->inputs[input_tick] = in;
+					client->input_views[input_tick] = view;
 				}
 			}
 		} break;
@@ -496,6 +629,13 @@ void PlanetNetServer::_step() {
 			++client.inputs_missed;
 		}
 		client.inputs.erase(tick);
+		const uint32_t *view = client.input_views.getptr(tick);
+		if (view != nullptr) {
+			client.view_tick = *view;
+		} else if (client.view_tick != 0) {
+			++client.view_tick; // a repeated input: the screen moved on a tick too
+		}
+		client.input_views.erase(tick);
 		const WalkerState s = walker.step(walker_state(*e), client.last_input, dt);
 		store_walker_state(*e, s);
 		// Reported even before any input arrives, so the client starts predicting from the exact state.
@@ -506,6 +646,7 @@ void PlanetNetServer::_step() {
 		client.applied_arrived[slot] = arrived != nullptr;
 		client.applied_position[slot] = s.position;
 	}
+	_resolve_swings();
 	for (KeyValue<uint64_t, Entity> &E : entities) {
 		_record_history(E.value);
 		const uint32_t key = regions.key_of(E.value.state.position);
@@ -725,6 +866,7 @@ Dictionary PlanetNetServer::get_stats() const {
 	d["region_size_m"] = regions.cell_size();
 	d["bytes_sent"] = link.get_bytes_sent();
 	d["bytes_received"] = link.get_bytes_received();
+	d["hits_resolved"] = hits_resolved;
 	return d;
 }
 
@@ -1260,6 +1402,14 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_player_position", "key"), &PlanetNetServer::get_player_position);
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
+	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));
+	ClassDB::bind_method(D_METHOD("set_entity_health", "id", "health_max"), &PlanetNetServer::set_entity_health);
+	ClassDB::bind_method(D_METHOD("get_entity_health", "id"), &PlanetNetServer::get_entity_health);
+	ClassDB::bind_method(D_METHOD("get_entity_health_max", "id"), &PlanetNetServer::get_entity_health_max);
+	ClassDB::bind_method(D_METHOD("get_entity_action", "id"), &PlanetNetServer::get_entity_action);
+	ClassDB::bind_method(D_METHOD("set_player_hits", "on"), &PlanetNetServer::set_player_hits);
+	ClassDB::bind_method(D_METHOD("get_player_hits"), &PlanetNetServer::get_player_hits);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "player_hits"), "set_player_hits", "get_player_hits");
 	ADD_SIGNAL(MethodInfo("client_disconnected", PropertyInfo(Variant::INT, "peer")));
 	ADD_SIGNAL(MethodInfo("world_change_requested", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::VECTOR3, "point"),
 			PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));

@@ -81,6 +81,7 @@ private:
 		uint32_t tick = 0;
 		PlanetNet::WalkerInput input;
 		PlanetNet::WalkerState state; // after applying input
+		uint32_t view = 0; // the tick others were being drawn at when the input was chosen
 	};
 
 	PlanetNetLink link;

@@ -107,6 +107,10 @@ private:
 		// Inputs by the tick they are for. The step for tick T applies inputs[T], or repeats the last
 		// input when it has not arrived; a late input is then useless and the client will be corrected.
 		HashMap<uint32_t, PlanetNet::WalkerInput> inputs;
+		// For each input, the tick its player was drawing others at when choosing it, and the one for the
+		// tick being applied: where its swings are judged against (lag compensation).
+		HashMap<uint32_t, uint32_t> input_views;
+		uint32_t view_tick = 0;
 		PlanetNet::WalkerInput last_input;
 		bool has_input = false;
 		// Teleports applied, mod 256; snapshots carry it so the client can tell word from before one.
@@ -142,6 +146,16 @@ private:
 		// kept here but in `state`, which is what replicates: read and write it through walker_state()
 		// and store_walker_state(), never field by field -- new walker state then cannot be forgotten.
 		PlanetNet::WalkerState walk;
+		// Combat (docs/COMBAT.md). A target has health_max > 0: players (when player_hits) and what
+		// set_entity_health makes one, such as a training dummy. Health refills after a rest.
+		int32_t health = 0;
+		int32_t health_max = 0;
+		uint32_t hurt_tick = 0;
+		// Ticks left of a hit reaction, for a target with no walker (drawn from its pose).
+		uint8_t react = 0;
+		// The swing in progress (by the tick it started) and what it has already struck: one blow each.
+		uint32_t swing_start = 0;
+		LocalVector<uint64_t> swing_hits;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -165,6 +179,9 @@ private:
 	HashMap<int, Client> clients;
 	HashMap<uint64_t, Entity> entities;
 	bool allow_teleport = true;
+	bool player_hits = false;
+	int32_t player_health = 100;
+	uint64_t hits_resolved = 0;
 	HashMap<uint32_t, LocalVector<uint64_t>> region_index;
 	PlanetNet::Regions regions;
 	uint16_t server_id = 1;
@@ -188,6 +205,8 @@ private:
 	void _interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const;
 	void _send_snapshot(int p_peer, Client &r_client);
 	void _record_history(Entity &r_entity);
+	void _resolve_swings();
+	void _strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at);
 
 	// Persistence: see save_world().
 	String world_path;
@@ -293,6 +312,34 @@ public:
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->walk.stamina) : 0;
 	}
+	// Combat (docs/COMBAT.md). A target: an entity given health, which swings in their window strike
+	// (players are targets of each other only with player_hits). The server judges every swing against
+	// where the targets were on the attacker's screen (lag compensation, at most LAG_TICKS back) and
+	// tells the clients that see either what it did (MSG_HIT), and scripts through `hit`.
+	static constexpr int LAG_TICKS = 20;
+	static constexpr double TARGET_RADIUS = 0.35;
+	static constexpr int LIGHT_DAMAGE = 10;
+	static constexpr int HEAVY_DAMAGE = 25;
+	static constexpr int LIGHT_GUARD_COST = 80;
+	static constexpr int HEAVY_GUARD_COST = 220;
+	static constexpr int HEALTH_REST_TICKS = 5 * PlanetNet::TICK_HZ;
+	void set_entity_health(int64_t p_id, int p_health_max);
+	int get_entity_health(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->health) : 0;
+	}
+	int get_entity_health_max(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->health_max) : 0;
+	}
+	void set_player_hits(bool p_on) { player_hits = p_on; }
+	bool get_player_hits() const { return player_hits; }
+	// A player's action now (PlanetNet::WalkerAction) and ticks into it.
+	int get_entity_action(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->walk.action) : 0;
+	}
+
 	// Whether hits pass through the entity this tick (a player mid-dodge).
 	bool is_entity_invulnerable(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));

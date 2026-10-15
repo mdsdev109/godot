@@ -116,7 +116,9 @@ public:
 	// Stands the character on the ground at a point.
 	void place(const Vector3 &p_point) { state = walker.place(state, p_point); }
 	// One tick. move is (right, forward) in [-1, 1]; yaw is the heading in radians from get_reference();
-	// buttons are 1 jump, 2 sprint, 4 let go. Inputs are rounded to float32 as the network rounds them.
+	// buttons are PlanetNet::WalkerButton bits: 1 jump, 2 sprint, 4 let go, 8 dodge, 16 light attack,
+	// 32 heavy, 64 block (held), 128 lock on (held: face yaw). Inputs are rounded to float32 as the
+	// network rounds them.
 	void step(const Vector2 &p_move, float p_yaw, int p_buttons, double p_dt);
 
 	Vector3 get_position() const { return state.position; }
@@ -144,4 +146,11 @@ public:
 	int get_action() const { return int(state.action); }
 	int get_action_ticks() const { return int(state.action_ticks); }
 	bool is_invulnerable() const { return walker.invulnerable(state); }
+	// Combat offline, by the server's rules (planet_net_walker.h; docs/COMBAT.md): whether this tick's
+	// swing can hit, whether it reaches a body at a point, whether the guard faces a blow from a point,
+	// and a blow taken (knocked back along push, on the guard or not).
+	bool is_hitting() const { return walker.hitting(state); }
+	bool swing_reaches(const Vector3 &p_feet, double p_radius) const { return walker.swing_reaches(state, p_feet, p_radius); }
+	bool guards(const Vector3 &p_from) const { return walker.guards(state, p_from); }
+	void recoil(const Vector3 &p_push, bool p_blocked) { state = walker.recoil(state, p_push, p_blocked); }
 };
