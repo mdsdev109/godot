@@ -245,6 +245,11 @@ struct Walker {
 	LocalVector<Vector3> body_feet;
 	LocalVector<double> body_radii;
 	static constexpr double BODY_HEIGHT = 1.8;
+	static constexpr double CLIMB_STEP = 0.3; // m: what stands out of a face no more than this, a climber steps onto
+	static constexpr double UNDERSIDE_WALL_REACH = 0.6; // a wall this near behind, on an underside, is the one climbed
+	// ... and that wall stands near upright (its normal this level): an inside corner, not the next facet
+	// of a curve -- inside a hollow sphere the ceiling's own facets turned a climber back down.
+	static constexpr double UNDERSIDE_WALL_LEVEL = 0.3;
 	static constexpr double BODY_SEPARATE = 2.0; // m/s at most, pushing apart bodies that overlap
 	// Shells: solid between an inner and an outer radius about a centre. Inner 0 is a ball. Not cut by
 	// carves.
@@ -1169,6 +1174,20 @@ private:
 			return spent;
 		}
 		dir = dir.normalized();
+		// On an underside -- under a hold, an overhang -- pushing on toward the wall it came up is climbing
+		// up into the corner: out from under it is the way up, round its edge. Taken as onward into the
+		// wall, a climber went onto the underside, back down the wall at the corner, up again, every
+		// tick: rubber-banding 2 cm up and down for as long as the stick was held. Decided by the wall
+		// being near along the way, not by flipping once, so it does not swing back a tick later; looking
+		// out from under (a slab crawled along), forward is out already and nothing is met.
+		if (n.dot(up) < -0.5 && my > 0.0) {
+			Vector3 corner;
+			Vector3 corner_normal;
+			if (cast(here + n * 0.02, here + n * 0.02 + dir * UNDERSIDE_WALL_REACH, corner, &corner_normal) &&
+					corner_normal.length_squared() > 0.5 && Math::abs(corner_normal.normalized().dot(up)) < UNDERSIDE_WALL_LEVEL) {
+				dir = -dir;
+			}
+		}
 		if (p_in.dash == 0) {
 			spent = _spend(r_out, climb_cost);
 		}
@@ -1184,6 +1203,25 @@ private:
 			// point already inside a collider does not see that collider at all.
 			Vector3 hit_normal;
 			if (cast(at + n * 0.02, target + n * 0.02, on, &hit_normal)) {
+				// Something shallow in the way -- a hold, a bump: no deeper than CLIMB_STEP out from the
+				// face, the same face found again in front of it. Stepped onto, as a walker steps up a kerb,
+				// rather than taken as the next face: its side faces turned a climber going sideways to
+				// face along the wall, where its stick meant nothing, and it stopped dead against the first
+				// hold it met. Only for a collider, which says which way its face faces.
+				// The air it steps through must be clear -- out from the face, then along it at a step's
+				// height -- or under a slab the probe starts inside it and finds the face behind.
+				Vector3 over;
+				Vector3 over_normal;
+				Vector3 blocked;
+				if (hit_normal.length_squared() > 0.5 && hit_normal.normalized().dot(dir) < -0.5 &&
+						!cast(at + n * 0.02, at + n * CLIMB_STEP, blocked) &&
+						!cast(at + n * CLIMB_STEP, target + n * CLIMB_STEP, blocked) &&
+						cast(target + n * CLIMB_STEP, target - n * 0.1, over, &over_normal) &&
+						over_normal.length_squared() > 0.5 && over_normal.normalized().dot(n) > 0.9 &&
+						(over - at).dot(n) > 0.005) {
+					at = over;
+					continue;
+				}
 				// A collider says which way its face faces: take it -- at an inside corner the probes
 				// straddle both faces and cannot. On the analytic ground, estimate it, guessing back along
 				// the way we came and out from the old face: right for an inside corner and for the same
