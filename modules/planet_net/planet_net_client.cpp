@@ -36,6 +36,7 @@ using namespace PlanetNet;
 
 Error PlanetNetClient::connect_to_server(const String &p_address, int p_port) {
 	disconnect_from_server();
+	move_table_refused = false;
 	server_peer = link.connect_to(p_address, p_port);
 	if (server_peer == 0) {
 		return ERR_CANT_CONNECT;
@@ -432,7 +433,17 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const double region_radius = r.f64();
 			const uint32_t region_resolution = r.u32();
 			const double walk_speed = r.f64();
+			const uint64_t move_hash = r.u64();
 			if (!r.ok() || version != PROTOCOL_VERSION) {
+				disconnect_from_server();
+				return;
+			}
+			const uint64_t own_hash = move_hash_override != 0 ? move_hash_override : moves().hash;
+			if (move_hash != own_hash) {
+				// Another move table: every move would be mispredicted. Leave, and say why.
+				ERR_PRINT(vformat("PlanetNetClient: the server's move table (%s) is not this client's (%s); leaving.",
+						String::num_uint64(move_hash, 16), String::num_uint64(own_hash, 16)));
+				move_table_refused = true;
 				disconnect_from_server();
 				return;
 			}
@@ -522,20 +533,7 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 		state.velocity.x = r_reader.f64();
 		state.velocity.y = r_reader.f64();
 		state.velocity.z = r_reader.f64();
-		state.reference.x = r_reader.f64();
-		state.reference.y = r_reader.f64();
-		state.reference.z = r_reader.f64();
-		state.mode = r_reader.u8();
-		state.latch = r_reader.u8();
-		state.normal.x = r_reader.f64();
-		state.normal.y = r_reader.f64();
-		state.normal.z = r_reader.f64();
-		state.flags = r_reader.u8();
-		state.dash = r_reader.u8();
-		state.stamina = r_reader.u16();
-		state.rest = r_reader.u8();
-		state.action = r_reader.u8();
-		state.action_ticks = r_reader.u8();
+		read_walk(r_reader, state);
 		const uint8_t teleports = r_reader.u8();
 		if (r_reader.ok() && teleports == teleports_requested) {
 			if (teleport_restart) {
@@ -784,6 +782,9 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_rotation", "id"), &PlanetNetClient::get_entity_rotation);
 	ClassDB::bind_method(D_METHOD("get_entity_velocity", "id"), &PlanetNetClient::get_entity_velocity);
 	ClassDB::bind_method(D_METHOD("get_entity_pose", "id"), &PlanetNetClient::get_entity_pose);
+	ClassDB::bind_method(D_METHOD("was_move_table_refused"), &PlanetNetClient::was_move_table_refused);
+	ClassDB::bind_method(D_METHOD("set_move_hash_override", "hash"), &PlanetNetClient::set_move_hash_override);
+	ClassDB::bind_static_method("PlanetNetClient", D_METHOD("get_move_table_hash"), &PlanetNetClient::get_move_table_hash);
 	ClassDB::bind_method(D_METHOD("get_stats"), &PlanetNetClient::get_stats);
 
 	ADD_SIGNAL(MethodInfo("connected", PropertyInfo(Variant::INT, "entity_id")));

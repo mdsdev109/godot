@@ -319,10 +319,9 @@ public:
 	// tells the clients that see either what it did (MSG_HIT), and scripts through `hit`.
 	static constexpr int LAG_TICKS = 20;
 	static constexpr double TARGET_RADIUS = 0.35;
-	static constexpr int LIGHT_DAMAGE = 10;
-	static constexpr int HEAVY_DAMAGE = 25;
-	static constexpr int LIGHT_GUARD_COST = 80;
-	static constexpr int HEAVY_GUARD_COST = 220;
+	// What a hit does -- damage, poise damage, push, what the guard pays -- is the move's
+	// (planet_net_moves.h). A guard that cannot pay breaks, the body pushed back this hard.
+	static constexpr double GUARD_BREAK_PUSH = 4.0;
 	static constexpr int HEALTH_REST_TICKS = 5 * PlanetNet::TICK_HZ;
 	void set_entity_health(int64_t p_id, int p_health_max);
 	int get_entity_health(int64_t p_id) const {

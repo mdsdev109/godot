@@ -88,6 +88,10 @@ private:
 	int server_peer = 0;
 	bool link_up = false;
 	bool welcomed = false;
+	// The server's move table was not this client's, and it left (planet_net_moves.h). A test sets the
+	// hash it claims to have, to see that happen.
+	bool move_table_refused = false;
+	uint64_t move_hash_override = 0;
 	uint64_t local_entity = 0;
 	uint16_t server_id = 0;
 	PlanetNet::Regions regions;
@@ -157,6 +161,10 @@ public:
 	void disconnect_from_server();
 	// True once the server has welcomed us and assigned our entity.
 	bool is_server_connected() const { return welcomed; }
+	bool was_move_table_refused() const { return move_table_refused; }
+	void set_move_hash_override(int64_t p_hash) { move_hash_override = uint64_t(p_hash); }
+	// The move table compiled in (planet_net_moves.h), by its hash.
+	static int64_t get_move_table_hash() { return int64_t(PlanetNet::moves().hash); }
 	void poll(double p_delta);
 
 	void set_link_conditions(double p_latency_ms, double p_jitter_ms, double p_loss);

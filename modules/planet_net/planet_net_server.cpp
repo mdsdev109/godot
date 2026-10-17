@@ -299,7 +299,7 @@ void PlanetNetServer::_resolve_swings() {
 
 void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at) {
 	const uint8_t attack = r_attacker.walk.action;
-	const bool heavy = attack == ACTION_HEAVY;
+	const Move &m = moves().get(attack);
 	const bool walks = r_target.state.type == ENTITY_TYPE_PLAYER;
 	const Vector3 up = walker.up_at(r_target.state.position);
 	Vector3 away = r_target.state.position - r_attacker.state.position;
@@ -310,28 +310,28 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 	if (walks && walker.invulnerable(r_target.walk)) {
 		result = HIT_DODGED;
 	} else if (walks && walker.guards(r_target.walk, r_attacker.state.position)) {
-		const uint16_t cost = uint16_t(heavy ? HEAVY_GUARD_COST : LIGHT_GUARD_COST);
+		const uint16_t cost = m.guard_cost;
 		WalkerState ts = walker_state(r_target);
 		if (ts.stamina >= cost) {
 			ts.stamina = uint16_t(ts.stamina - cost);
 			ts.rest = walker.stamina_rest_ticks;
 			result = HIT_BLOCKED;
-			store_walker_state(r_target, walker.recoil(ts, away * (heavy ? 3.0 : 2.0), true));
+			store_walker_state(r_target, walker.recoil(ts, away * m.guard_push, ACTION_BLOCKED));
 		} else {
 			ts.stamina = 0;
 			ts.flags |= FLAG_EXHAUSTED;
 			result = HIT_GUARD_BROKEN;
-			store_walker_state(r_target, walker.recoil(ts, away * 4.0, false));
+			store_walker_state(r_target, walker.recoil(ts, away * GUARD_BREAK_PUSH, ACTION_STAGGER));
 		}
 	} else {
-		damage = heavy ? HEAVY_DAMAGE : LIGHT_DAMAGE;
+		damage = m.damage;
 		r_target.health = MAX(0, r_target.health - damage);
 		r_target.hurt_tick = tick;
 		if (walks) {
-			store_walker_state(r_target, walker.recoil(walker_state(r_target), away * (heavy ? 5.0 : 3.0), false));
+			store_walker_state(r_target, walker.recoil(walker_state(r_target), away * m.push, ACTION_STAGGER));
 		} else {
-			r_target.react = walker.stagger_ticks;
-			r_target.state.pose = uint8_t(ACTION_STAGGER << 4);
+			r_target.react = moves().get(ACTION_STAGGER).ticks;
+			r_target.state.pose = uint16_t(ACTION_STAGGER << 4);
 		}
 	}
 	++hits_resolved;
@@ -496,6 +496,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			w.f64(regions.radius);
 			w.u32(regions.resolution);
 			w.f64(walker.speed);
+			w.u64(moves().hash);
 			link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 			emit_signal(SNAME("client_connected"), p_peer, id);
 		} break;
@@ -830,20 +831,7 @@ void PlanetNetServer::_send_snapshot(int p_peer, Client &r_client) {
 		w.f64(double(self->state.velocity.x));
 		w.f64(double(self->state.velocity.y));
 		w.f64(double(self->state.velocity.z));
-		w.f64(double(self->walk.reference.x));
-		w.f64(double(self->walk.reference.y));
-		w.f64(double(self->walk.reference.z));
-		w.u8(self->walk.mode);
-		w.u8(self->walk.latch);
-		w.f64(double(self->walk.normal.x));
-		w.f64(double(self->walk.normal.y));
-		w.f64(double(self->walk.normal.z));
-		w.u8(self->walk.flags);
-		w.u8(self->walk.dash);
-		w.u16(self->walk.stamina);
-		w.u8(self->walk.rest);
-		w.u8(self->walk.action);
-		w.u8(self->walk.action_ticks);
+		write_walk(w, self->walk);
 		w.u8(r_client.teleports);
 	}
 	const uint32_t count_at = w.size();

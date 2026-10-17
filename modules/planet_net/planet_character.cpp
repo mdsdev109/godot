@@ -41,6 +41,57 @@ void PlanetCharacter::step(const Vector2 &p_move, float p_yaw, int p_buttons, do
 	state = walker.step(state, in, p_dt);
 }
 
+Dictionary PlanetCharacter::get_move_info(int p_id) {
+	using namespace PlanetNet;
+	Dictionary d;
+	if (p_id < 0 || p_id >= ACTION_COUNT) {
+		return d;
+	}
+	const Move &m = moves().get(uint8_t(p_id));
+	d["id"] = p_id;
+	d["name"] = String(m.name);
+	d["kind"] = int(m.kind);
+	d["ticks"] = int(m.ticks);
+	d["stamina"] = int(m.stamina);
+	d["focus"] = int(m.focus);
+	d["cooldown"] = int(m.cooldown);
+	d["steer"] = m.steer;
+	d["upper_body"] = m.upper_body;
+	d["track_to"] = int(m.track_to);
+	d["track_rate"] = m.track_rate;
+	d["root"] = int(m.root);
+	d["root_from"] = int(m.root_from);
+	d["root_to"] = int(m.root_to);
+	d["root_speed"] = m.root_speed;
+	d["invulnerable_from"] = int(m.invulnerable_from);
+	d["invulnerable_to"] = int(m.invulnerable_to);
+	d["armour"] = int(m.armour);
+	d["armour_from"] = int(m.armour_from);
+	d["armour_to"] = int(m.armour_to);
+	d["fragile"] = m.fragile;
+	d["shape"] = int(m.shape);
+	d["hit_from"] = int(m.hit_from);
+	d["hit_to"] = int(m.hit_to);
+	d["reach"] = m.reach;
+	d["arc"] = m.arc;
+	d["radius"] = m.radius;
+	d["range"] = m.range;
+	d["damage"] = int(m.damage);
+	d["poise_damage"] = int(m.poise_damage);
+	d["reaction"] = int(m.reaction);
+	Array cancels;
+	for (uint8_t i = 0; i < m.cancel_count; ++i) {
+		Dictionary c;
+		c["into"] = int(m.cancels[i].into);
+		c["from"] = int(m.cancels[i].from);
+		c["to"] = int(m.cancels[i].to);
+		c["extra_stamina"] = int(m.cancels[i].extra_stamina);
+		cancels.push_back(c);
+	}
+	d["cancels"] = cancels;
+	return d;
+}
+
 void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_field", "field"), &PlanetCharacter::set_field);
 	ClassDB::bind_method(D_METHOD("get_field"), &PlanetCharacter::get_field);
@@ -100,6 +151,10 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("swing_reaches", "feet", "radius"), &PlanetCharacter::swing_reaches);
 	ClassDB::bind_method(D_METHOD("guards", "from"), &PlanetCharacter::guards);
 	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);
+	ClassDB::bind_method(D_METHOD("react", "push", "move"), &PlanetCharacter::react);
+	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_info", "id"), &PlanetCharacter::get_move_info);
+	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_count"), &PlanetCharacter::get_move_count);
+	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_table_hash"), &PlanetCharacter::get_move_table_hash);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "field", PROPERTY_HINT_RESOURCE_TYPE, "PlanetField3D"), "set_field", "get_field");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_radius", "get_planet_radius");

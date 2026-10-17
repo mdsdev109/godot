@@ -38,6 +38,7 @@
 // branches, no state that is not in WalkerState.
 
 #include "core/math/planet_det_math.h"
+#include "planet_net_moves.h"
 #include "core/math/quaternion.h"
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
@@ -74,21 +75,7 @@ enum WalkerButton : uint8_t {
 	BUTTON_LOCK = 128, // held: face the way of `yaw` (a locked-on target) rather than the way it moves
 };
 
-// What the walker is doing on top of its mode.
-enum WalkerAction : uint8_t {
-	ACTION_NONE = 0,
-	ACTION_DODGE = 1, // a committed roll along the ground
-	// Combat (planet-demo docs/COMBAT.md). Each is ticks long and committed, as the dodge is, but for
-	// the guard, which lasts while it is held. The two lights alternate along a combo, so a body on
-	// another machine, which sees only the action, sees each swing start.
-	ACTION_LIGHT = 2,
-	ACTION_LIGHT_2 = 3,
-	ACTION_HEAVY = 4,
-	ACTION_BLOCK = 5,
-	ACTION_STAGGER = 6, // hit: knocked back, no control (set by the server: Walker::recoil)
-	ACTION_BLOCKED = 7, // a hit taken on the guard: pushed back a little
-	ACTION_CLIMB_JUMP = 8, // a climb jump, a dyno: the wind-up and the lunge (Walker::dash_windup, dash_ticks)
-};
+// What the walker is doing on top of its mode is a move: WalkerAction, in planet_net_moves.h.
 
 struct WalkerInput {
 	Vector2 move; // (right, forward), each in [-1, 1]
@@ -117,22 +104,70 @@ struct WalkerState {
 	uint16_t stamina = 1000;
 	// Ticks before stamina starts to refill, counted down from the last time it was spent.
 	uint8_t rest = 0;
-	uint8_t action = ACTION_NONE; // WalkerAction
-	uint8_t action_ticks = 0; // ticks into the action
+	uint8_t action = ACTION_NONE; // the move (WalkerAction, planet_net_moves.h)
+	uint8_t action_ticks = 0; // ticks into it
+	// Where a move aimed at the ground lands (SHAPE_AREA), set when it starts.
+	Vector3 aim;
 };
+
+// The walker's state on the wire beyond position and velocity, in one place for the server's writer
+// and the client's reader (W and R: PlanetNet::Writer and Reader), so a new member cannot be written by
+// one end and missed by the other. Doubles go whole: a prediction must match to the bit.
+template <typename W>
+inline void write_walk(W &w, const WalkerState &s) {
+	w.f64(double(s.reference.x));
+	w.f64(double(s.reference.y));
+	w.f64(double(s.reference.z));
+	w.u8(s.mode);
+	w.u8(s.latch);
+	w.f64(double(s.normal.x));
+	w.f64(double(s.normal.y));
+	w.f64(double(s.normal.z));
+	w.u8(s.flags);
+	w.u8(s.dash);
+	w.u16(s.stamina);
+	w.u8(s.rest);
+	w.u8(s.action);
+	w.u8(s.action_ticks);
+	w.f64(double(s.aim.x));
+	w.f64(double(s.aim.y));
+	w.f64(double(s.aim.z));
+}
+
+template <typename R>
+inline void read_walk(R &r, WalkerState &s) {
+	s.reference.x = r.f64();
+	s.reference.y = r.f64();
+	s.reference.z = r.f64();
+	s.mode = r.u8();
+	s.latch = r.u8();
+	s.normal.x = r.f64();
+	s.normal.y = r.f64();
+	s.normal.z = r.f64();
+	s.flags = r.u8();
+	s.dash = r.u8();
+	s.stamina = r.u16();
+	s.rest = r.u8();
+	s.action = r.u8();
+	s.action_ticks = r.u8();
+	s.aim.x = r.f64();
+	s.aim.y = r.f64();
+	s.aim.z = r.f64();
+}
 
 // Whether two walker states are the same to the bit: everything a step reads. What a prediction must
 // equal (planet_net_client.cpp).
 inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 	return a.position == b.position && a.velocity == b.velocity && a.reference == b.reference &&
 			a.mode == b.mode && a.normal == b.normal && a.flags == b.flags && a.dash == b.dash &&
-			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks;
+			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks &&
+			a.aim == b.aim;
 }
 
-// What the body is doing, for drawing it on other machines: the mode in the low four bits, the action
-// in the high four. Replicated with every player (EntityState::pose).
-inline uint8_t pose_of(const WalkerState &p_state) {
-	return uint8_t((p_state.mode & 15u) | ((p_state.action & 15u) << 4));
+// What the body is doing, for drawing it on other machines: the mode in the low four bits, the move
+// above them. Replicated with every player (EntityState::pose).
+inline uint16_t pose_of(const WalkerState &p_state) {
+	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4));
 }
 
 // planet-demo docs/CHARACTER.md. Four modes: on the ground, in the air, climbing, gliding.
@@ -184,18 +219,9 @@ struct Walker {
 	uint16_t sprint_cost = 4;
 	uint16_t climb_cost = 3; // moving on a wall; holding still costs nothing, as in BotW
 	uint16_t climb_jump_cost = 120;
-	uint16_t dodge_cost = 150;
 	uint16_t glide_cost = 1;
 	uint16_t stamina_regen = 12; // once rested: empty to full in under 3 s
 	uint8_t stamina_rest_ticks = 30; // a second after spending before it refills
-
-	// The dodge: a roll along the ground in a committed direction, decelerating, with a window in the
-	// middle where hits do not land (invulnerable()). About 3 m in 0.6 s.
-	uint8_t dodge_ticks = 18;
-	double dodge_speed = 7.5;
-	double dodge_end_speed = 3.0;
-	uint8_t dodge_guard_from = 2; // ticks into the roll
-	uint8_t dodge_guard_to = 12;
 
 	// The glider: opened by jump in the air once past the top of a jump; a capped sink, steered.
 	double glide_sink = 2.2; // m/s down at most
@@ -204,29 +230,9 @@ struct Walker {
 	double glide_accel = 5.0;
 	double glide_open_rise = 2.0; // rising faster than this, jump does not open it
 
-	// Combat, in ticks at 30 Hz (planet-demo docs/COMBAT.md). Each attack is committed for its ticks,
-	// and hits only in its window [from, to), which the clips' contact frames were measured for.
-	uint8_t light_ticks = 22;
-	uint8_t light_hit_from = 9;
-	uint8_t light_hit_to = 14;
-	uint8_t light_chain_from = 13; // a light pressed from here on starts the next of the combo
-	uint16_t light_cost = 60;
-	double light_lunge = 1.5; // m/s along the facing, ticks 3 to the window's end: half a metre
-	double light_reach = 2.0; // from the attacker's centre to the target's surface
-	double light_arc = 60.0; // degrees either side of the facing
-	uint8_t heavy_ticks = 36;
-	uint8_t heavy_hit_from = 14;
-	uint8_t heavy_hit_to = 20;
-	uint16_t heavy_cost = 150;
-	double heavy_lunge = 2.0; // m/s, ticks 9 to the window's end
-	double heavy_reach = 2.4;
-	double heavy_arc = 80.0;
-	double swing_height = 1.6; // a target's feet this far above or below the attacker's still reach
-	double attack_move = 0.2; // of the walk speed, steering while swinging
-	double block_move = 0.35; // of the walk speed, guarding
+	// Combat (planet-demo docs/COMBAT.md, COMBAT_DESIGN.md): every attack, ability, dodge and hit
+	// reaction is a row of the move table (planet_net_moves.h), played by _run_move.
 	double block_arc = 100.0; // degrees either side of the facing the guard covers
-	uint8_t stagger_ticks = 20;
-	uint8_t blocked_ticks = 10;
 	double recoil_brake = 10.0; // m/s^2 slowing a knock-back
 
 	// Down.
@@ -612,45 +618,49 @@ struct Walker {
 		return f.normalized();
 	}
 
-	// Whether hits pass through this walker this tick: the middle of a dodge.
+	// The move the walker is in.
+	static const Move &move_of(const WalkerState &p_state) { return moves().get(p_state.action); }
+
+	// Whether hits pass through this walker this tick: a move's untouchable window (the dodge's).
 	bool invulnerable(const WalkerState &p_state) const {
-		return p_state.action == ACTION_DODGE && p_state.action_ticks >= dodge_guard_from && p_state.action_ticks < dodge_guard_to;
+		const Move &m = move_of(p_state);
+		return p_state.action_ticks >= m.invulnerable_from && p_state.action_ticks < m.invulnerable_to;
 	}
 
-	static bool is_light(uint8_t p_action) { return p_action == ACTION_LIGHT || p_action == ACTION_LIGHT_2; }
-	static bool is_attack(uint8_t p_action) { return is_light(p_action) || p_action == ACTION_HEAVY; }
-
-	// Whether this tick's swing can hit: an attack, inside its window.
+	// Whether this tick's move can hit: one that hits, inside its window.
 	bool hitting(const WalkerState &p_state) const {
-		if (is_light(p_state.action)) {
-			return p_state.action_ticks >= light_hit_from && p_state.action_ticks < light_hit_to;
-		}
-		if (p_state.action == ACTION_HEAVY) {
-			return p_state.action_ticks >= heavy_hit_from && p_state.action_ticks < heavy_hit_to;
-		}
-		return false;
+		const Move &m = move_of(p_state);
+		return m.hits() && p_state.action_ticks >= m.hit_from && p_state.action_ticks < m.hit_to;
 	}
 
-	// Whether a swing from `p_state` reaches a body standing at `p_feet` with radius `p_radius`: within
-	// reach of its centre in the ground plane, in the arc in front, its feet within swing_height.
+	// Whether the move in `p_state` reaches a body standing at `p_feet` with radius `p_radius`, by its hit's
+	// shape: within reach in the arc in front, within its radius all round, or within its radius of the
+	// aim point -- and the body's feet within its height. Judged by the server (and offline the game),
+	// never predicted.
 	bool swing_reaches(const WalkerState &p_state, const Vector3 &p_feet, double p_radius) const {
+		const Move &m = move_of(p_state);
+		if (!m.hits()) {
+			return false;
+		}
 		const Vector3 up = up_at(p_state.position);
-		const Vector3 d = p_feet - p_state.position;
+		const Vector3 centre = m.shape == SHAPE_AREA ? p_state.aim : p_state.position;
+		const Vector3 d = p_feet - centre;
 		const double dv = d.dot(up);
-		if (Math::abs(dv) > swing_height) {
+		if (Math::abs(dv) > m.height) {
 			return false;
 		}
 		const Vector3 dh = d - up * dv;
 		const double dist = dh.length();
-		const bool heavy = p_state.action == ACTION_HEAVY;
-		if (dist > (heavy ? heavy_reach : light_reach) + p_radius) {
+		if (m.shape == SHAPE_AROUND || m.shape == SHAPE_AREA) {
+			return dist <= m.radius + p_radius;
+		}
+		if (dist > m.reach + p_radius) {
 			return false;
 		}
 		if (dist <= p_radius + body_radius) {
 			return true; // touching
 		}
-		const double arc = Math::deg_to_rad(heavy ? heavy_arc : light_arc);
-		return _facing(p_state, up).dot(dh / dist) >= Math::cos(arc);
+		return _facing(p_state, up).dot(dh / dist) >= Math::cos(Math::deg_to_rad(m.arc));
 	}
 
 	// Whether a guard held in `p_state` faces a blow from `p_from`.
@@ -667,9 +677,9 @@ struct Walker {
 		return _facing(p_state, up).dot(d.normalized()) >= Math::cos(Math::deg_to_rad(block_arc));
 	}
 
-	// A hit landing: knocked back along `p_push` (m/s, flattened onto the ground), staggered -- or, on
-	// the guard, `p_blocked`, pushed back less and sooner over. In the air only the push.
-	WalkerState recoil(const WalkerState &p_state, const Vector3 &p_push, bool p_blocked) const {
+	// A hit landing: knocked back along `p_push` (m/s, flattened onto the ground) into a reaction move
+	// (ACTION_STAGGER, ACTION_BLOCKED on the guard, ...). In the air only the push.
+	WalkerState recoil(const WalkerState &p_state, const Vector3 &p_push, uint8_t p_reaction) const {
 		WalkerState out = p_state;
 		const Vector3 up = up_at(p_state.position);
 		const Vector3 push = p_push - up * p_push.dot(up);
@@ -677,7 +687,7 @@ struct Walker {
 			out.velocity += push;
 			return out;
 		}
-		out.action = p_blocked ? ACTION_BLOCKED : ACTION_STAGGER;
+		out.action = p_reaction;
 		out.action_ticks = 1;
 		out.velocity = push;
 		return out;
@@ -735,66 +745,19 @@ struct Walker {
 			default: {
 				const Vector3 vh = p_state.velocity - up * p_state.velocity.dot(up);
 				const bool locked = (p_input.buttons & BUTTON_LOCK) && !sprinting;
-				if (p_state.action == ACTION_STAGGER || p_state.action == ACTION_BLOCKED) {
-					// Knocked back: no control, the push braking, the body facing as it was.
-					out.action_ticks = p_state.action_ticks + 1;
-					const double sp = vh.length();
-					const double slower = MAX(0.0, sp - recoil_brake * p_dt);
-					_ground(out, p_state, up, sp > 1e-9 ? vh * (slower / sp) : Vector3(), p_dt);
-					if (out.mode == MODE_GROUND) {
-						out.rotation = p_state.rotation;
-					}
-					if (out.action_ticks >= (p_state.action == ACTION_STAGGER ? stagger_ticks : blocked_ticks)) {
-						out.action = ACTION_NONE;
-						out.action_ticks = 0;
-					}
-				} else if (is_attack(p_state.action)) {
-					// Swinging: committed, steering a little, lunging into the blow; late in a light, the
-					// next of the combo or a heavy.
-					const bool light = is_light(p_state.action);
-					const uint8_t ticks = light ? light_ticks : heavy_ticks;
-					const bool chain = light && p_state.action_ticks >= light_chain_from && !(p_state.flags & FLAG_EXHAUSTED);
-					if (chain && (pressed & BUTTON_LIGHT) && p_state.stamina >= light_cost) {
-						spent = _attack(out, p_state, p_state.action == ACTION_LIGHT ? ACTION_LIGHT_2 : ACTION_LIGHT,
-								up, forward, wish, locked, moving, vh, p_dt);
-					} else if (chain && (pressed & BUTTON_HEAVY) && p_state.stamina >= heavy_cost) {
-						spent = _attack(out, p_state, ACTION_HEAVY, up, forward, wish, locked, moving, vh, p_dt);
+				const Move &now = move_of(p_state);
+				const uint8_t intent = _intent(pressed);
+				const Ground g{ up, forward, wish, vh, locked, moving };
+				if (now.committed()) {
+					// In a move: what a press may start part way through it (a cancel window), or on with it.
+					const uint8_t next = _cancel_into(now, p_state, intent);
+					if (next != ACTION_NONE && _affords(p_state, moves().get(next), _cancel_extra(now, p_state, intent))) {
+						spent = _start_move(out, p_state, next, _cancel_extra(now, p_state, intent), g, p_dt);
 					} else {
-						out.action_ticks = p_state.action_ticks + 1;
-						const Vector3 face = locked ? forward : _facing(p_state, up);
-						const uint8_t lunge_from = light ? 3 : 9;
-						const uint8_t lunge_to = light ? light_hit_to : heavy_hit_to;
-						const double lunge = (p_state.action_ticks >= lunge_from && p_state.action_ticks < lunge_to) ? (light ? light_lunge : heavy_lunge) : 0.0;
-						_ground(out, p_state, up, _ease(vh, wish * speed * attack_move + face * lunge, p_dt), p_dt);
-						if (out.mode == MODE_GROUND) {
-							out.rotation = facing_rotation(face, up);
-						}
-						if (out.action_ticks >= ticks) {
-							out.action = ACTION_NONE;
-							out.action_ticks = 0;
-						}
+						_run_move(out, p_state, now, g, p_dt);
 					}
-				} else if (p_state.action == ACTION_DODGE) {
-					// Committed: the stick and buttons wait until the roll is done.
-					out.action_ticks = p_state.action_ticks + 1;
-					const double t = double(p_state.action_ticks) / double(dodge_ticks);
-					const Vector3 along = vh.length_squared() > 1e-12 ? vh.normalized() : _facing(p_state, up);
-					_ground(out, p_state, up, along * (dodge_speed + (dodge_end_speed - dodge_speed) * t), p_dt);
-					if (out.action_ticks >= dodge_ticks || out.mode != MODE_GROUND || out.velocity.length_squared() < 1e-6) {
-						out.action = ACTION_NONE;
-						out.action_ticks = 0;
-					}
-				} else if ((pressed & BUTTON_DODGE) && p_state.stamina >= dodge_cost && !(p_state.flags & FLAG_EXHAUSTED)) {
-					// A roll the way the stick points, or the way the body faces.
-					out.action = ACTION_DODGE;
-					out.action_ticks = 1;
-					const Vector3 along = moving ? wish.normalized() : _facing(p_state, up);
-					spent = _spend(out, dodge_cost);
-					_ground(out, p_state, up, along * dodge_speed, p_dt);
-				} else if ((pressed & BUTTON_LIGHT) && p_state.stamina >= light_cost && !(p_state.flags & FLAG_EXHAUSTED)) {
-					spent = _attack(out, p_state, ACTION_LIGHT, up, forward, wish, locked, moving, vh, p_dt);
-				} else if ((pressed & BUTTON_HEAVY) && p_state.stamina >= heavy_cost && !(p_state.flags & FLAG_EXHAUSTED)) {
-					spent = _attack(out, p_state, ACTION_HEAVY, up, forward, wish, locked, moving, vh, p_dt);
+				} else if (intent != INTENT_NONE && _affords(p_state, moves().get(_intent_move(p_state, intent)), 0)) {
+					spent = _start_move(out, p_state, _intent_move(p_state, intent), 0, g, p_dt);
 				} else if (pressed & BUTTON_JUMP) {
 					out.action = ACTION_NONE;
 					out.action_ticks = 0;
@@ -809,9 +772,10 @@ struct Walker {
 					_air(out, launched, up, wish * run_speed, p_dt);
 				} else if (p_input.buttons & BUTTON_BLOCK) {
 					// Guarding, for as long as it is held: slow, facing the way of yaw.
+					const Move &guard = moves().get(ACTION_BLOCK);
 					out.action = ACTION_BLOCK;
 					out.action_ticks = p_state.action == ACTION_BLOCK ? uint8_t(MIN(255, p_state.action_ticks + 1)) : 1;
-					_ground(out, p_state, up, _ease(vh, wish * speed * block_move, p_dt), p_dt);
+					_ground(out, p_state, up, _ease(vh, wish * speed * guard.steer, p_dt), p_dt);
 					if (out.mode == MODE_GROUND) {
 						out.rotation = facing_rotation(forward, up);
 					}
@@ -840,19 +804,165 @@ struct Walker {
 	}
 
 private:
-	// Starts an attack: facing the target when locked on, else the way the stick points, else the way
-	// the body faces; the first tick's move. Spends its stamina; returns true.
-	bool _attack(WalkerState &r_out, const WalkerState &p_in, uint8_t p_action, const Vector3 &p_up, const Vector3 &p_forward,
-			const Vector3 &p_wish, bool p_locked, bool p_moving, const Vector3 &p_vh, double p_dt) const {
-		const Vector3 face = p_locked ? p_forward : (p_moving ? p_wish.normalized() : _facing(p_in, p_up));
-		r_out.action = p_action;
-		r_out.action_ticks = 1;
-		_spend(r_out, is_light(p_action) ? light_cost : heavy_cost);
-		_ground(r_out, p_in, p_up, _ease(p_vh, p_wish * speed * attack_move, p_dt), p_dt);
-		if (r_out.mode == MODE_GROUND) {
-			r_out.rotation = facing_rotation(face, p_up);
+	// What a ground tick's input means for the move table.
+	struct Ground {
+		Vector3 up;
+		Vector3 forward; // the way of yaw: the locked-on target's
+		Vector3 wish; // the stick, in the ground plane, at most 1 long
+		Vector3 vh; // the ground velocity
+		bool locked;
+		bool moving;
+	};
+
+	// What this tick's presses ask for, the strongest first: a dodge, a light, a heavy.
+	static uint8_t _intent(uint8_t p_pressed) {
+		if (p_pressed & BUTTON_DODGE) {
+			return INTENT_DODGE;
 		}
+		if (p_pressed & BUTTON_LIGHT) {
+			return INTENT_LIGHT;
+		}
+		if (p_pressed & BUTTON_HEAVY) {
+			return INTENT_HEAVY;
+		}
+		return INTENT_NONE;
+	}
+
+	// The move an intent starts from where the walker is.
+	static uint8_t _intent_move(const WalkerState &p_state, uint8_t p_intent) {
+		switch (p_intent) {
+			case INTENT_DODGE:
+				return ACTION_DODGE;
+			case INTENT_LIGHT:
+				return move_of(p_state).kind == KIND_ATTACK ? move_of(p_state).next_light : ACTION_LIGHT;
+			case INTENT_HEAVY:
+				return ACTION_HEAVY;
+			default:
+				return ACTION_NONE;
+		}
+	}
+
+	static uint8_t _intent_into(uint8_t p_intent) {
+		switch (p_intent) {
+			case INTENT_DODGE:
+				return INTO_DODGE;
+			case INTENT_LIGHT:
+				return INTO_LIGHT;
+			case INTENT_HEAVY:
+				return INTO_HEAVY;
+			default:
+				return p_intent >= INTENT_ABILITY ? INTO_ABILITY : 0;
+		}
+	}
+
+	// The cancel window of `p_move` open now for an intent, if any.
+	static const MoveCancel *_window(const Move &p_move, const WalkerState &p_state, uint8_t p_intent) {
+		const uint8_t into = _intent_into(p_intent);
+		for (uint8_t i = 0; i < p_move.cancel_count && into != 0; ++i) {
+			const MoveCancel &c = p_move.cancels[i];
+			if ((c.into & into) && p_state.action_ticks >= c.from && p_state.action_ticks < c.to) {
+				return &c;
+			}
+		}
+		return nullptr;
+	}
+
+	static uint8_t _cancel_into(const Move &p_move, const WalkerState &p_state, uint8_t p_intent) {
+		return _window(p_move, p_state, p_intent) != nullptr ? _intent_move(p_state, p_intent) : uint8_t(ACTION_NONE);
+	}
+
+	static uint16_t _cancel_extra(const Move &p_move, const WalkerState &p_state, uint8_t p_intent) {
+		const MoveCancel *c = _window(p_move, p_state, p_intent);
+		return c != nullptr ? c->extra_stamina : 0;
+	}
+
+	// Whether a move can be started: its stamina (plus a cancel's extra), not exhausted.
+	bool _affords(const WalkerState &p_state, const Move &p_move, uint16_t p_extra) const {
+		if (p_move.kind == KIND_NONE) {
+			return false;
+		}
+		const uint32_t stamina = uint32_t(p_move.stamina) + p_extra;
+		return p_state.stamina >= stamina && !(p_state.flags & FLAG_EXHAUSTED);
+	}
+
+	// Starts a move: pays for it, faces the way it goes (the target locked on, else the stick, else as
+	// it faced), and runs its first tick. Returns true (stamina spent).
+	bool _start_move(WalkerState &r_out, const WalkerState &p_in, uint8_t p_id, uint16_t p_extra, const Ground &p_g, double p_dt) const {
+		const Move &m = moves().get(p_id);
+		r_out.action = p_id;
+		r_out.action_ticks = 0;
+		_spend(r_out, uint16_t(MIN(uint32_t(m.stamina) + p_extra, 65535u)));
+		const Vector3 face = m.root == ROOT_ROLL ? (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up))
+												: (p_g.locked ? p_g.forward : (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up)));
+		WalkerState from = p_in;
+		from.action = p_id;
+		from.action_ticks = 0;
+		from.rotation = facing_rotation(face, p_g.up);
+		_run_move(r_out, from, m, p_g, p_dt, &face);
 		return true;
+	}
+
+	// One tick of a move: steering, tracking and its own motion; over at its last tick. `p_along`, on the
+	// tick it starts, is the way it goes.
+	void _run_move(WalkerState &r_out, const WalkerState &p_in, const Move &p_move, const Ground &p_g, double p_dt, const Vector3 *p_along = nullptr) const {
+		const uint8_t t = p_in.action_ticks;
+		r_out.action = p_in.action;
+		r_out.action_ticks = uint8_t(MIN(255, t + 1));
+		Vector3 face = _facing(p_in, p_g.up);
+		if (p_move.kind != KIND_REACTION && t < p_move.track_to) {
+			// Tracking: turned toward the target locked on.
+			if (p_g.locked) {
+				face = _turn_toward(face, p_g.forward, p_g.up, p_move.track_rate);
+			}
+		}
+		const bool live_root = t >= p_move.root_from && t < p_move.root_to;
+		Vector3 velocity;
+		switch (p_move.root) {
+			case ROOT_ROLL: {
+				Vector3 along = p_along != nullptr ? *p_along : (p_g.vh.length_squared() > 1e-12 ? p_g.vh.normalized() : face);
+				const double k = p_move.ticks > 0 ? double(t) / double(p_move.ticks) : 0.0;
+				velocity = along * (p_move.root_speed + (p_move.root_end_speed - p_move.root_speed) * k);
+			} break;
+			case ROOT_BRAKE: {
+				const double sp = p_g.vh.length();
+				const double slower = MAX(0.0, sp - recoil_brake * p_dt);
+				velocity = sp > 1e-9 ? p_g.vh * (slower / sp) : Vector3();
+			} break;
+			case ROOT_FACING:
+				velocity = _ease(p_g.vh, p_g.wish * speed * p_move.steer + face * (live_root ? p_move.root_speed : 0.0), p_dt);
+				break;
+			default:
+				velocity = _ease(p_g.vh, p_g.wish * speed * p_move.steer, p_dt);
+				break;
+		}
+		_ground(r_out, p_in, p_g.up, velocity, p_dt);
+		if (r_out.mode == MODE_GROUND) {
+			if (p_move.kind == KIND_REACTION) {
+				r_out.rotation = p_in.rotation; // knocked back facing as it was
+			} else if (p_move.root != ROOT_ROLL) {
+				r_out.rotation = facing_rotation(face, p_g.up);
+			}
+		}
+		const bool stopped = p_move.ends_when_stopped && (r_out.mode != MODE_GROUND || r_out.velocity.length_squared() < 1e-6);
+		if (r_out.action_ticks >= p_move.ticks || stopped) {
+			r_out.action = ACTION_NONE;
+			r_out.action_ticks = 0;
+		}
+	}
+
+	// `p_from` turned about `p_up` toward `p_to` by at most `p_degrees` (0: all the way).
+	static Vector3 _turn_toward(const Vector3 &p_from, const Vector3 &p_to, const Vector3 &p_up, double p_degrees) {
+		if (p_degrees <= 0.0) {
+			return p_to;
+		}
+		const double rate = p_degrees * (Math::PI / 180.0);
+		const double c = PlanetDetMath::cos(rate);
+		if (p_from.dot(p_to) >= c) {
+			return p_to;
+		}
+		const Vector3 side = p_up.cross(p_from);
+		const double s = PlanetDetMath::sin(rate) * (side.dot(p_to) >= 0.0 ? 1.0 : -1.0);
+		return (p_from * c + side * s).normalized();
 	}
 
 	// The ground velocity eased toward the wished one: accelerating, or braking when the stick is let go

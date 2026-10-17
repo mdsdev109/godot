@@ -57,12 +57,13 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 11;
+constexpr uint16_t PROTOCOL_VERSION = 12;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
 	MSG_WELCOME, // server -> client: u16 version, u16 server id, u64 your entity, f64 region radius,
-	//              u32 regions per face edge, f64 walk speed
+	//              u32 regions per face edge, f64 walk speed, u64 the move table's hash (a client whose
+	//              table differs leaves: it would mispredict every move)
 	MSG_PING, // client -> server: f64 client clock (s)
 	MSG_PONG, // server -> client: f64 client clock echoed, f64 server time (ticks)
 	MSG_INPUT, // client -> server: u32 newest snapshot seq, u32 ack bits, u8 n,
@@ -106,9 +107,9 @@ struct EntityState {
 	Vector3 position;
 	Quaternion rotation;
 	Vector3 velocity;
-	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | action << 4); 0 for
+	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | move << 4); 0 for
 	// anything that is not a player.
-	uint8_t pose = 0;
+	uint16_t pose = 0;
 	// How a player is drawn: what it chose (the game packs its body, clothes and colours into it,
 	// CharacterAvatar.pack_look); the server keeps it and passes it on without reading it. 0: unset.
 	uint64_t look = 0;
@@ -210,7 +211,7 @@ struct Wire {
 	float offset[3] = { 0.f, 0.f, 0.f };
 	uint32_t rotation = 0;
 	uint16_t velocity[3] = { 0, 0, 0 };
-	uint8_t pose = 0;
+	uint16_t pose = 0;
 	uint64_t look = 0;
 
 	static Wire encode(const EntityState &p_state, const Regions &p_regions) {
@@ -344,7 +345,7 @@ public:
 			u16(p_now.velocity[2]);
 		}
 		if (flags & RECORD_POSE) {
-			u8(p_now.pose);
+			u16(p_now.pose);
 		}
 		if (flags & RECORD_LOOK) {
 			u64(p_now.look);
@@ -412,7 +413,7 @@ public:
 			r_wire.velocity[2] = u16();
 		}
 		if (p_flags & RECORD_POSE) {
-			r_wire.pose = u8();
+			r_wire.pose = u16();
 		}
 		if (p_flags & RECORD_LOOK) {
 			r_wire.look = u64();

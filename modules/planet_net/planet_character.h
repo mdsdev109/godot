@@ -162,5 +162,13 @@ public:
 	bool is_hitting() const { return walker.hitting(state); }
 	bool swing_reaches(const Vector3 &p_feet, double p_radius) const { return walker.swing_reaches(state, p_feet, p_radius); }
 	bool guards(const Vector3 &p_from) const { return walker.guards(state, p_from); }
-	void recoil(const Vector3 &p_push, bool p_blocked) { state = walker.recoil(state, p_push, p_blocked); }
+	void recoil(const Vector3 &p_push, bool p_blocked) { state = walker.recoil(state, p_push, p_blocked ? PlanetNet::ACTION_BLOCKED : PlanetNet::ACTION_STAGGER); }
+	// A hit landing as the server lands one: knocked back along push into the reaction move `p_move`.
+	void react(const Vector3 &p_push, int p_move) { state = walker.recoil(state, p_push, uint8_t(p_move)); }
+
+	// The move table (planet_net_moves.h), for whoever draws or shows the moves: a move by id as a
+	// Dictionary of its fields, how many ids there are, and the table's hash.
+	static Dictionary get_move_info(int p_id);
+	static int get_move_count() { return PlanetNet::ACTION_COUNT; }
+	static int64_t get_move_table_hash() { return int64_t(PlanetNet::moves().hash); }
 };
