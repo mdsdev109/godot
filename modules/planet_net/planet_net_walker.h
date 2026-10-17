@@ -824,7 +824,8 @@ struct Walker {
 				}
 			} break;
 		}
-		if (out.mode != MODE_GROUND && out.action != ACTION_NONE) {
+		// The ground's actions end off the ground; a climb jump is the wall's own (cleared above when it ends).
+		if (out.mode != MODE_GROUND && out.action != ACTION_NONE && !(out.mode == MODE_CLIMB && out.action == ACTION_CLIMB_JUMP)) {
 			out.action = ACTION_NONE;
 			out.action_ticks = 0;
 		}
