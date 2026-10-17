@@ -317,9 +317,16 @@ public:
 	}
 	// Combat (docs/COMBAT.md). A target: an entity given health, which swings in their window strike
 	// (players are targets of each other only with player_hits). The server judges every swing against
-	// where the targets were on the attacker's screen (lag compensation, at most LAG_TICKS back) and
+	// where the targets were on the attacker's screen (lag compensation, at most max_rewind_ticks back) and
 	// tells the clients that see either what it did (MSG_HIT), and scripts through `hit`.
-	static constexpr int LAG_TICKS = 20;
+	// How far back a swing may be judged: the clients' interpolation delay (100 ms, 3 ticks) and about
+	// 170 ms of an attacker's own latency. Past that the attacker must lead its target: a body that rolled
+	// out of reach was struck where it had stood half a second before (docs/COMBAT_DESIGN.md section 7).
+	// Whether the target is dodging or guarding is read now, whatever the rewind.
+	static constexpr int MAX_REWIND_TICKS = 8;
+	int max_rewind_ticks = MAX_REWIND_TICKS;
+	void set_max_rewind_ticks(int p_ticks) { max_rewind_ticks = CLAMP(p_ticks, 0, HISTORY_TICKS - 1); }
+	int get_max_rewind_ticks() const { return max_rewind_ticks; }
 	static constexpr double TARGET_RADIUS = 0.35;
 	// What a hit does -- damage, poise damage, push, what the guard pays -- is the move's
 	// (planet_net_moves.h). A guard that cannot pay breaks, the body pushed back this hard.

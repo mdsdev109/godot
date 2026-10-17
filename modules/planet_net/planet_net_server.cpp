@@ -280,9 +280,10 @@ void PlanetNetServer::_resolve_swings() {
 			a->swing_start = start;
 			a->swing_hits.clear();
 		}
-		// Where the others were on this player's screen when it swung: its view, at most LAG_TICKS back.
+		// Where the others were on this player's screen when it swung: its view, at most max_rewind_ticks back.
 		const uint32_t view = client.view_tick != 0 ? client.view_tick : tick;
-		const double at = double(MAX(view, tick > uint32_t(LAG_TICKS) ? tick - uint32_t(LAG_TICKS) : 0u));
+		const uint32_t most = uint32_t(max_rewind_ticks);
+		const double at = double(MAX(view, tick > most ? tick - most : 0u));
 		const WalkerState swing = walker_state(*a);
 		for (KeyValue<uint64_t, Entity> &T : entities) {
 			Entity &t = T.value;
@@ -945,6 +946,10 @@ Dictionary PlanetNetServer::get_client_stats(int p_peer) const {
 	d["last_acked_seq"] = c->last_acked_seq;
 	d["inputs_applied"] = c->inputs_applied;
 	d["inputs_missed"] = c->inputs_missed;
+	// The tick its newest input says it was drawing others at, and how far behind the server that is now:
+	// what a swing of its would be rewound by (at most max_rewind_ticks).
+	d["view_tick"] = int64_t(c->view_tick);
+	d["view_behind"] = c->view_tick != 0 ? int64_t(tick) - int64_t(c->view_tick) : int64_t(0);
 	return d;
 }
 
@@ -1474,6 +1479,9 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_health_max", "id"), &PlanetNetServer::get_entity_health_max);
 	ClassDB::bind_method(D_METHOD("get_entity_action", "id"), &PlanetNetServer::get_entity_action);
 	ClassDB::bind_method(D_METHOD("get_entity_poise", "id"), &PlanetNetServer::get_entity_poise);
+	ClassDB::bind_method(D_METHOD("set_max_rewind_ticks", "ticks"), &PlanetNetServer::set_max_rewind_ticks);
+	ClassDB::bind_method(D_METHOD("get_max_rewind_ticks"), &PlanetNetServer::get_max_rewind_ticks);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_rewind_ticks"), "set_max_rewind_ticks", "get_max_rewind_ticks");
 	ClassDB::bind_method(D_METHOD("get_entity_combat", "id"), &PlanetNetServer::get_entity_combat);
 	ClassDB::bind_method(D_METHOD("set_entity_loadout", "id", "moves"), &PlanetNetServer::set_entity_loadout);
 	ClassDB::bind_method(D_METHOD("set_player_hits", "on"), &PlanetNetServer::set_player_hits);
