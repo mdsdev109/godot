@@ -1135,9 +1135,24 @@ private:
 		const double fl = f.length();
 		const double w = CLAMP((ul - 0.2) / 0.3, 0.0, 1.0);
 		Vector3 ahead = (ul > 1e-9 ? u / ul : Vector3()) * w + (fl > 1e-9 ? f / fl : Vector3()) * (1.0 - w);
-		Vector3 side = p_right - p_normal * p_normal.dot(p_right);
-		if (side.length_squared() > 1e-12) {
-			side = side.normalized();
+		// Sideways is the climber's own right on the face (its up across its normal), as climbing games
+		// take it -- the camera's right whenever the camera is behind it. The camera's right flattened onto
+		// the face was nothing past an outside corner, where it points into the next face: a climber going
+		// round one stopped dead on it.
+		Vector3 side;
+		if (ahead.length_squared() > 1e-12) {
+			ahead = ahead.normalized();
+			side = ahead.cross(p_normal).normalized();
+			// The stick's right is the climber's left only with the camera in front of it, looking back at it.
+			const Vector3 cam_side = p_right - p_normal * p_normal.dot(p_right);
+			if (cam_side.length_squared() > 0.25 && cam_side.dot(side) < 0.0) {
+				side = -side;
+			}
+		} else {
+			side = p_right - p_normal * p_normal.dot(p_right);
+			if (side.length_squared() > 1e-12) {
+				side = side.normalized();
+			}
 		}
 		return ahead * p_my + side * p_mx;
 	}
