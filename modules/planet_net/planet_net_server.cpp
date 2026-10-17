@@ -306,6 +306,7 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 	away -= up * away.dot(up);
 	away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
 	uint8_t result = HIT_STRUCK;
+	uint8_t reaction = ACTION_NONE;
 	int damage = 0;
 	if (walks && walker.invulnerable(r_target.walk)) {
 		result = HIT_DODGED;
@@ -316,11 +317,13 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 			ts.stamina = uint16_t(ts.stamina - cost);
 			ts.rest = walker.stamina_rest_ticks;
 			result = HIT_BLOCKED;
+			reaction = ACTION_BLOCKED;
 			store_walker_state(r_target, walker.recoil(ts, away * m.guard_push, ACTION_BLOCKED));
 		} else {
 			ts.stamina = 0;
 			ts.flags |= FLAG_EXHAUSTED;
 			result = HIT_GUARD_BROKEN;
+			reaction = ACTION_STAGGER;
 			store_walker_state(r_target, walker.recoil(ts, away * GUARD_BREAK_PUSH, ACTION_STAGGER));
 		}
 	} else {
@@ -328,10 +331,15 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 		r_target.health = MAX(0, r_target.health - damage);
 		r_target.hurt_tick = tick;
 		if (walks) {
-			store_walker_state(r_target, walker.recoil(walker_state(r_target), away * m.push, ACTION_STAGGER));
+			// Its poise takes the blow, or breaks into the blow's reaction (Walker::take_hit).
+			store_walker_state(r_target, walker.take_hit(walker_state(r_target), m, away, reaction));
 		} else {
-			r_target.react = moves().get(ACTION_STAGGER).ticks;
-			r_target.state.pose = uint16_t(ACTION_STAGGER << 4);
+			// A target without a walker (the dummy) has no poise: every blow lands its reaction.
+			reaction = Walker::reaction_move(m.reaction);
+			if (reaction != ACTION_NONE) {
+				r_target.react = moves().get(reaction).ticks;
+				r_target.state.pose = uint16_t(reaction << 4);
+			}
 		}
 	}
 	++hits_resolved;
@@ -346,6 +354,7 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 	w.f64(p_at.x);
 	w.f64(p_at.y);
 	w.f64(p_at.z);
+	w.u8(reaction);
 	// To each client that sees either end, and to both.
 	for (KeyValue<int, Client> &C : clients) {
 		const Client &c = C.value;
@@ -367,6 +376,7 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 	hit["damage"] = damage;
 	hit["health"] = int(r_target.health);
 	hit["point"] = p_at;
+	hit["reaction"] = int(reaction);
 	hit["tick"] = int(tick);
 	emit_signal(SNAME("hit"), hit);
 }
@@ -1423,6 +1433,7 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_health", "id"), &PlanetNetServer::get_entity_health);
 	ClassDB::bind_method(D_METHOD("get_entity_health_max", "id"), &PlanetNetServer::get_entity_health_max);
 	ClassDB::bind_method(D_METHOD("get_entity_action", "id"), &PlanetNetServer::get_entity_action);
+	ClassDB::bind_method(D_METHOD("get_entity_poise", "id"), &PlanetNetServer::get_entity_poise);
 	ClassDB::bind_method(D_METHOD("set_player_hits", "on"), &PlanetNetServer::set_player_hits);
 	ClassDB::bind_method(D_METHOD("get_player_hits"), &PlanetNetServer::get_player_hits);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "player_hits"), "set_player_hits", "get_player_hits");

@@ -339,6 +339,11 @@ public:
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->walk.action) : 0;
 	}
+	// A player's poise (Walker::take_hit).
+	int get_entity_poise(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->walk.poise) : 0;
+	}
 
 	// Bodies the walkers cannot pass through (Walker::body_feet): entities of these types, each type its
 	// radius. Server and clients must name the same, or a client predicts walking through what the

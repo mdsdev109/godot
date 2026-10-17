@@ -265,6 +265,7 @@ public:
 	// PlanetNet::WalkerAction (0 none, 1 dodge) and how many ticks into it.
 	int get_predicted_action() const { return int(predicted.action); }
 	int get_predicted_action_ticks() const { return int(predicted.action_ticks); }
+	int get_predicted_poise() const { return int(predicted.poise); }
 	// Climbing: the outward normal of the face held.
 	Vector3 get_predicted_normal() const { return predicted.normal; }
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game

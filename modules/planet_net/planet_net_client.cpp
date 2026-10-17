@@ -470,6 +470,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			point.y = r.f64();
 			point.z = r.f64();
 			hit["point"] = point;
+			hit["reaction"] = int(r.u8());
 			if (r.ok()) {
 				emit_signal(SNAME("hit"), hit);
 			}
@@ -742,6 +743,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_predicted_exhausted"), &PlanetNetClient::is_predicted_exhausted);
 	ClassDB::bind_method(D_METHOD("get_predicted_action"), &PlanetNetClient::get_predicted_action);
 	ClassDB::bind_method(D_METHOD("get_predicted_action_ticks"), &PlanetNetClient::get_predicted_action_ticks);
+	ClassDB::bind_method(D_METHOD("get_predicted_poise"), &PlanetNetClient::get_predicted_poise);
 	ClassDB::bind_method(D_METHOD("get_predicted_normal"), &PlanetNetClient::get_predicted_normal);
 	ClassDB::bind_method(D_METHOD("get_local_entity_id"), &PlanetNetClient::get_local_entity_id);
 	ClassDB::bind_method(D_METHOD("get_server_time_estimate"), &PlanetNetClient::get_server_time_estimate);

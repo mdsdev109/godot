@@ -169,6 +169,19 @@ public:
 	void recoil(const Vector3 &p_push, bool p_blocked) { state = walker.recoil(state, p_push, p_blocked ? PlanetNet::ACTION_BLOCKED : PlanetNet::ACTION_STAGGER); }
 	// A hit landing as the server lands one: knocked back along push into the reaction move `p_move`.
 	void react(const Vector3 &p_push, int p_move) { state = walker.recoil(state, p_push, uint8_t(p_move)); }
+	// A blow by the move `p_attack` landing as the server lands one -- through poise, armour and fragile
+	// casts (Walker::take_hit) -- pushed along `p_away` (a direction). Returns the reaction move it caused,
+	// 0 when poise took it.
+	int take_hit(int p_attack, const Vector3 &p_away) {
+		uint8_t reaction = PlanetNet::ACTION_NONE;
+		const Vector3 up = walker.up_at(state.position);
+		Vector3 away = p_away - up * p_away.dot(up);
+		away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
+		state = walker.take_hit(state, PlanetNet::moves().get(uint8_t(CLAMP(p_attack, 0, 255))), away, reaction);
+		return int(reaction);
+	}
+	int get_poise() const { return int(state.poise); }
+	int get_poise_max() const { return int(walker.poise_max); }
 
 	// The move table (planet_net_moves.h), for whoever draws or shows the moves: a move by id as a
 	// Dictionary of its fields, how many ids there are, and the table's hash.

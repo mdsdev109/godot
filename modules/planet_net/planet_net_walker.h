@@ -112,6 +112,10 @@ struct WalkerState {
 	// more ticks, and started on the first of them that allows it.
 	uint8_t buffer = 0;
 	uint8_t buffer_ticks = 0;
+	// Poise (planet-demo docs/COMBAT_DESIGN.md section 3): what a hit's poise damage comes off. At 0 the
+	// hit's reaction lands and it is full again; it refills after poise_rest ticks without a hit.
+	uint16_t poise = 60;
+	uint8_t poise_rest = 0;
 };
 
 // The walker's state on the wire beyond position and velocity, in one place for the server's writer
@@ -138,6 +142,8 @@ inline void write_walk(W &w, const WalkerState &s) {
 	w.f64(double(s.aim.z));
 	w.u8(s.buffer);
 	w.u8(s.buffer_ticks);
+	w.u16(s.poise);
+	w.u8(s.poise_rest);
 }
 
 template <typename R>
@@ -161,6 +167,8 @@ inline void read_walk(R &r, WalkerState &s) {
 	s.aim.z = r.f64();
 	s.buffer = r.u8();
 	s.buffer_ticks = r.u8();
+	s.poise = r.u16();
+	s.poise_rest = r.u8();
 }
 
 // Whether two walker states are the same to the bit: everything a step reads. What a prediction must
@@ -169,7 +177,8 @@ inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 	return a.position == b.position && a.velocity == b.velocity && a.reference == b.reference &&
 			a.mode == b.mode && a.normal == b.normal && a.flags == b.flags && a.dash == b.dash &&
 			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks &&
-			a.aim == b.aim && a.buffer == b.buffer && a.buffer_ticks == b.buffer_ticks;
+			a.aim == b.aim && a.buffer == b.buffer && a.buffer_ticks == b.buffer_ticks && a.poise == b.poise &&
+			a.poise_rest == b.poise_rest;
 }
 
 // What the body is doing, for drawing it on other machines: the mode in the low four bits, the move
@@ -245,6 +254,11 @@ struct Walker {
 	// How many ticks a press waits for a move to allow it (a cancel window opening, a reaction ending).
 	// 0: a press that cannot start at once is dropped.
 	uint8_t buffer_ticks = 9;
+	// Poise: a light's poise damage is 35 and a heavy's 70, so the second light in a row breaks it and a
+	// heavy always does, unless armour takes some off. It refills after 2 s without a hit, in 1 s.
+	uint16_t poise_max = 60;
+	uint8_t poise_rest_ticks = 60;
+	uint16_t poise_regen = 2;
 
 	// Down.
 	Vector3 gravity_centre;
@@ -704,6 +718,49 @@ struct Walker {
 		return out;
 	}
 
+	// The reaction move for a Reaction.
+	static uint8_t reaction_move(uint8_t p_reaction) {
+		switch (p_reaction) {
+			case REACT_FLINCH:
+				return ACTION_FLINCH;
+			case REACT_STAGGER:
+				return ACTION_STAGGER;
+			case REACT_KNOCKDOWN:
+				return ACTION_KNOCKDOWN;
+			default:
+				return ACTION_NONE;
+		}
+	}
+
+	// A hit by `p_attack` landing (not guarded, not dodged): its poise damage, less the armour of the move
+	// the walker is in, comes off its poise. Broken -- poise at 0 -- the hit's reaction lands and poise is
+	// full again; a fragile move (a cast) is interrupted by any hit, a flinch at least. Otherwise the walker
+	// takes it and carries on: a trade. `r_reaction` is the reaction move that landed, or ACTION_NONE.
+	// Judged by the server (and offline the game), never predicted: the client is corrected to it.
+	WalkerState take_hit(const WalkerState &p_state, const Move &p_attack, const Vector3 &p_away, uint8_t &r_reaction) const {
+		WalkerState out = p_state;
+		const Move &now = move_of(p_state);
+		uint16_t damage = p_attack.poise_damage;
+		if (now.armour > 0 && p_state.action_ticks >= now.armour_from && p_state.action_ticks < now.armour_to) {
+			damage = damage > now.armour ? uint16_t(damage - now.armour) : uint16_t(0);
+		}
+		out.poise = damage >= out.poise ? uint16_t(0) : uint16_t(out.poise - damage);
+		out.poise_rest = poise_rest_ticks;
+		uint8_t reaction = REACT_NONE;
+		if (out.poise == 0) {
+			reaction = p_attack.reaction;
+			out.poise = poise_max;
+		}
+		if (now.fragile && reaction == REACT_NONE) {
+			reaction = REACT_FLINCH;
+		}
+		r_reaction = reaction_move(reaction);
+		if (r_reaction != ACTION_NONE) {
+			out = recoil(out, p_away * p_attack.push, r_reaction);
+		}
+		return out;
+	}
+
 	WalkerState step(const WalkerState &p_state, const WalkerInput &p_input, double p_dt) const {
 		const Vector3 up = up_at(p_state.position);
 		const Vector3 north = transport(p_state.reference, up);
@@ -724,6 +781,12 @@ struct Walker {
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
+		// Poise refills after a rest without hits.
+		if (out.poise_rest > 0) {
+			--out.poise_rest;
+		} else if (out.poise < poise_max) {
+			out.poise = uint16_t(MIN(uint32_t(poise_max), uint32_t(out.poise) + poise_regen));
+		}
 		// The input buffer: this tick's press, or one still waiting.
 		const uint8_t pressed_intent = _intent(pressed);
 		if (pressed_intent != INTENT_NONE) {
@@ -978,8 +1041,7 @@ private:
 				r_out.rotation = facing_rotation(face, p_g.up);
 			}
 		}
-		const bool stopped = p_move.ends_when_stopped && (r_out.mode != MODE_GROUND || r_out.velocity.length_squared() < 1e-6);
-		if (r_out.action_ticks >= p_move.ticks || stopped) {
+		if (r_out.action_ticks >= p_move.ticks) {
 			r_out.action = ACTION_NONE;
 			r_out.action_ticks = 0;
 		}

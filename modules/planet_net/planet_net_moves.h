@@ -149,7 +149,6 @@ struct Move {
 	uint8_t root_to = 0;
 	double root_speed = 0.0;
 	double root_end_speed = 0.0;
-	bool ends_when_stopped = false; // a roll that has stopped (into a wall, off an edge) is over
 
 	// Hits pass through the body in this window.
 	uint8_t invulnerable_from = 0;
@@ -205,7 +204,9 @@ struct MoveTable {
 		none.name = "none";
 
 		// The dodge: a roll along the ground the way the stick points (or the body faces), easing from 7.5
-		// to 3 m/s, about 3.3 m; hits pass through ticks 2-11.
+		// to 3 m/s, about 3.3 m; hits pass through ticks 2-11. Rolled into a wall or a body it plays out
+		// its ticks where it is, untouchable as ever (it used to end there, and a roll at an attacker
+		// standing close lost its untouchable ticks); off an edge it ends, as every ground move does.
 		Move &dodge = t.moves[ACTION_DODGE];
 		dodge.name = "dodge";
 		dodge.kind = KIND_DODGE;
@@ -216,7 +217,6 @@ struct MoveTable {
 		dodge.root_to = 18;
 		dodge.root_speed = 7.5;
 		dodge.root_end_speed = 3.0;
-		dodge.ends_when_stopped = true;
 		dodge.invulnerable_from = 2;
 		dodge.invulnerable_to = 12;
 
@@ -245,7 +245,7 @@ struct MoveTable {
 			m.arc = 60.0;
 			m.damage = 10;
 			m.poise_damage = 35;
-			m.reaction = REACT_STAGGER;
+			m.reaction = REACT_FLINCH;
 			m.push = 3.0;
 			m.guard_cost = 80;
 			m.guard_push = 2.0;
@@ -277,6 +277,11 @@ struct MoveTable {
 		heavy.damage = 25;
 		heavy.poise_damage = 70;
 		heavy.reaction = REACT_STAGGER;
+		// Hyper-armour from late in the windup through the live ticks: a light's poise damage (35) taken
+		// off whole, so a heavy trades through a light rather than being interrupted by it.
+		heavy.armour = 40;
+		heavy.armour_from = 10;
+		heavy.armour_to = 20;
 		heavy.push = 5.0;
 		heavy.guard_cost = 220;
 		heavy.guard_push = 3.0;
@@ -301,6 +306,22 @@ struct MoveTable {
 		blocked.kind = KIND_REACTION;
 		blocked.ticks = 10;
 		blocked.root = ROOT_BRAKE;
+
+		// A flinch: a light blow broke the poise. Short: a third of a second.
+		Move &flinch = t.moves[ACTION_FLINCH];
+		flinch.name = "flinch";
+		flinch.kind = KIND_REACTION;
+		flinch.ticks = 9;
+		flinch.root = ROOT_BRAKE;
+		// Knocked down: a crushing blow broke the poise. A second and a half on the floor, untouchable once
+		// down until getting up, so a body on the floor cannot be held there.
+		Move &knockdown = t.moves[ACTION_KNOCKDOWN];
+		knockdown.name = "knockdown";
+		knockdown.kind = KIND_REACTION;
+		knockdown.ticks = 45;
+		knockdown.root = ROOT_BRAKE;
+		knockdown.invulnerable_from = 10;
+		knockdown.invulnerable_to = 40;
 
 		Move &climb_jump = t.moves[ACTION_CLIMB_JUMP];
 		climb_jump.name = "climb_jump";
@@ -338,7 +359,6 @@ struct MoveTable {
 			u(m.root_to);
 			d(m.root_speed);
 			d(m.root_end_speed);
-			u(m.ends_when_stopped);
 			u(m.invulnerable_from);
 			u(m.invulnerable_to);
 			u(m.armour);

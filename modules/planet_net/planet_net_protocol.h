@@ -57,7 +57,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 13;
+constexpr uint16_t PROTOCOL_VERSION = 14;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -80,7 +80,8 @@ enum MessageType : uint8_t {
 	MSG_TELEPORT, // client -> server, control: f64 x3 point. Put me on the ground there (if allowed).
 	MSG_LOOK, // client -> server, control: u64 look. How my player is drawn (EntityState::look).
 	MSG_HIT, // server -> client, control: u64 attacker, u64 target, u8 result (HitResult), u8 attack
-	//          (WalkerAction), u16 damage, u16 health left, f64 x3 where the target was struck
+	//          (WalkerAction), u16 damage, u16 health left, f64 x3 where the target was struck,
+	//          u8 the reaction move it caused (0: none -- its poise took it)
 };
 
 // What a swing did to what it reached (MSG_HIT).

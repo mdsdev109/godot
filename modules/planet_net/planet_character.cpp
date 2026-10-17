@@ -154,6 +154,9 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("guards", "from"), &PlanetCharacter::guards);
 	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);
 	ClassDB::bind_method(D_METHOD("react", "push", "move"), &PlanetCharacter::react);
+	ClassDB::bind_method(D_METHOD("take_hit", "attack", "away"), &PlanetCharacter::take_hit);
+	ClassDB::bind_method(D_METHOD("get_poise"), &PlanetCharacter::get_poise);
+	ClassDB::bind_method(D_METHOD("get_poise_max"), &PlanetCharacter::get_poise_max);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_info", "id"), &PlanetCharacter::get_move_info);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_count"), &PlanetCharacter::get_move_count);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_table_hash"), &PlanetCharacter::get_move_table_hash);
