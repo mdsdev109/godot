@@ -108,6 +108,10 @@ struct WalkerState {
 	uint8_t action_ticks = 0; // ticks into it
 	// Where a move aimed at the ground lands (SHAPE_AREA), set when it starts.
 	Vector3 aim;
+	// The input buffer: a press that could not start its move yet (an Intent), kept for buffer_ticks
+	// more ticks, and started on the first of them that allows it.
+	uint8_t buffer = 0;
+	uint8_t buffer_ticks = 0;
 };
 
 // The walker's state on the wire beyond position and velocity, in one place for the server's writer
@@ -132,6 +136,8 @@ inline void write_walk(W &w, const WalkerState &s) {
 	w.f64(double(s.aim.x));
 	w.f64(double(s.aim.y));
 	w.f64(double(s.aim.z));
+	w.u8(s.buffer);
+	w.u8(s.buffer_ticks);
 }
 
 template <typename R>
@@ -153,6 +159,8 @@ inline void read_walk(R &r, WalkerState &s) {
 	s.aim.x = r.f64();
 	s.aim.y = r.f64();
 	s.aim.z = r.f64();
+	s.buffer = r.u8();
+	s.buffer_ticks = r.u8();
 }
 
 // Whether two walker states are the same to the bit: everything a step reads. What a prediction must
@@ -161,7 +169,7 @@ inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 	return a.position == b.position && a.velocity == b.velocity && a.reference == b.reference &&
 			a.mode == b.mode && a.normal == b.normal && a.flags == b.flags && a.dash == b.dash &&
 			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks &&
-			a.aim == b.aim;
+			a.aim == b.aim && a.buffer == b.buffer && a.buffer_ticks == b.buffer_ticks;
 }
 
 // What the body is doing, for drawing it on other machines: the mode in the low four bits, the move
@@ -234,6 +242,9 @@ struct Walker {
 	// reaction is a row of the move table (planet_net_moves.h), played by _run_move.
 	double block_arc = 100.0; // degrees either side of the facing the guard covers
 	double recoil_brake = 10.0; // m/s^2 slowing a knock-back
+	// How many ticks a press waits for a move to allow it (a cancel window opening, a reaction ending).
+	// 0: a press that cannot start at once is dropped.
+	uint8_t buffer_ticks = 9;
 
 	// Down.
 	Vector3 gravity_centre;
@@ -713,6 +724,14 @@ struct Walker {
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
+		// The input buffer: this tick's press, or one still waiting.
+		const uint8_t pressed_intent = _intent(pressed);
+		if (pressed_intent != INTENT_NONE) {
+			out.buffer = pressed_intent;
+			out.buffer_ticks = buffer_ticks;
+		}
+		const uint8_t intent = out.buffer_ticks > 0 ? out.buffer : uint8_t(INTENT_NONE);
+		bool used_intent = false;
 		// A climb jump is over once off the wall, however it left it.
 		if (out.action == ACTION_CLIMB_JUMP && (p_state.mode != MODE_CLIMB || p_state.dash == 0)) {
 			out.action = ACTION_NONE;
@@ -746,18 +765,25 @@ struct Walker {
 				const Vector3 vh = p_state.velocity - up * p_state.velocity.dot(up);
 				const bool locked = (p_input.buttons & BUTTON_LOCK) && !sprinting;
 				const Move &now = move_of(p_state);
-				const uint8_t intent = _intent(pressed);
 				const Ground g{ up, forward, wish, vh, locked, moving };
+				const bool can_start = !now.committed() && intent != INTENT_NONE && _affords(p_state, moves().get(_intent_move(p_state, intent)), 0);
+				if (!now.committed() && intent != INTENT_NONE && !can_start) {
+					// Free to move but unable to pay: the press is dropped, not kept until stamina comes back --
+					// the buffer is for presses a move is holding up.
+					used_intent = true;
+				}
 				if (now.committed()) {
 					// In a move: what a press may start part way through it (a cancel window), or on with it.
 					const uint8_t next = _cancel_into(now, p_state, intent);
 					if (next != ACTION_NONE && _affords(p_state, moves().get(next), _cancel_extra(now, p_state, intent))) {
 						spent = _start_move(out, p_state, next, _cancel_extra(now, p_state, intent), g, p_dt);
+						used_intent = true;
 					} else {
 						_run_move(out, p_state, now, g, p_dt);
 					}
-				} else if (intent != INTENT_NONE && _affords(p_state, moves().get(_intent_move(p_state, intent)), 0)) {
+				} else if (can_start) {
 					spent = _start_move(out, p_state, _intent_move(p_state, intent), 0, g, p_dt);
+					used_intent = true;
 				} else if (pressed & BUTTON_JUMP) {
 					out.action = ACTION_NONE;
 					out.action_ticks = 0;
@@ -792,6 +818,13 @@ struct Walker {
 					}
 				}
 			} break;
+		}
+		// A buffered press is used up by the move it started, or waits out its ticks.
+		if (used_intent) {
+			out.buffer = INTENT_NONE;
+			out.buffer_ticks = 0;
+		} else if (out.buffer_ticks > 0 && --out.buffer_ticks == 0) {
+			out.buffer = INTENT_NONE;
 		}
 		// The ground's actions end off the ground; a climb jump is the wall's own (cleared above when it ends).
 		if (out.mode != MODE_GROUND && out.action != ACTION_NONE && !(out.mode == MODE_CLIMB && out.action == ACTION_CLIMB_JUMP)) {
@@ -910,9 +943,11 @@ private:
 		r_out.action_ticks = uint8_t(MIN(255, t + 1));
 		Vector3 face = _facing(p_in, p_g.up);
 		if (p_move.kind != KIND_REACTION && t < p_move.track_to) {
-			// Tracking: turned toward the target locked on.
+			// Tracking, through the windup: turned toward the target locked on, or the way the stick points.
 			if (p_g.locked) {
 				face = _turn_toward(face, p_g.forward, p_g.up, p_move.track_rate);
+			} else if (p_g.moving) {
+				face = _turn_toward(face, p_g.wish.normalized(), p_g.up, p_move.track_rate);
 			}
 		}
 		const bool live_root = t >= p_move.root_from && t < p_move.root_to;

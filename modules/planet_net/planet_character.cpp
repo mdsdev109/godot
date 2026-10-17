@@ -109,6 +109,8 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_gravity"), &PlanetCharacter::get_gravity);
 	ClassDB::bind_method(D_METHOD("set_can_climb", "can"), &PlanetCharacter::set_can_climb);
 	ClassDB::bind_method(D_METHOD("get_can_climb"), &PlanetCharacter::get_can_climb);
+	ClassDB::bind_method(D_METHOD("set_input_buffer_ticks", "ticks"), &PlanetCharacter::set_input_buffer_ticks);
+	ClassDB::bind_method(D_METHOD("get_input_buffer_ticks"), &PlanetCharacter::get_input_buffer_ticks);
 	ClassDB::bind_method(D_METHOD("add_carve", "centre", "radius"), &PlanetCharacter::add_carve);
 	ClassDB::bind_method(D_METHOD("clear_carves"), &PlanetCharacter::clear_carves);
 	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetCharacter::get_ground_radius);

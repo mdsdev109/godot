@@ -220,8 +220,10 @@ struct MoveTable {
 		dodge.invulnerable_from = 2;
 		dodge.invulnerable_to = 12;
 
-		// The lights: 22 ticks, live 9-13, a 1.5 m/s lunge ticks 3-13 (half a metre); late in one, the
-		// next of the combo or a heavy.
+		// The lights: 22 ticks, live 9-13, a 1.5 m/s lunge ticks 3-13 (half a metre). Tracking the target
+		// (or the stick) through the windup, 20 degrees a tick, then committed to the way it faces. Late in
+		// one, the next of the combo or a heavy; once past its live ticks, a dodge out of it, dearer, or an
+		// ability.
 		const uint8_t lights[2] = { ACTION_LIGHT, ACTION_LIGHT_2 };
 		for (uint8_t id : lights) {
 			Move &m = t.moves[id];
@@ -230,7 +232,8 @@ struct MoveTable {
 			m.ticks = 22;
 			m.stamina = 60;
 			m.steer = 0.2;
-			m.track_to = 255;
+			m.track_to = 9;
+			m.track_rate = 20.0;
 			m.root = ROOT_FACING;
 			m.root_from = 3;
 			m.root_to = 14;
@@ -247,17 +250,21 @@ struct MoveTable {
 			m.guard_cost = 80;
 			m.guard_push = 2.0;
 			m.cancel(INTO_LIGHT | INTO_HEAVY, 13);
+			m.cancel(INTO_DODGE, 14, 255, 30);
+			m.cancel(INTO_ABILITY, 14);
 			m.next_light = id == ACTION_LIGHT ? ACTION_LIGHT_2 : ACTION_LIGHT;
 		}
 
-		// The heavy: 36 ticks, live 14-19, a 2 m/s lunge ticks 9-19.
+		// The heavy: 36 ticks, live 14-19, a 2 m/s lunge ticks 9-19; tracking slower and only through the
+		// windup; a dodge or an ability late in its recovery, a light at its very end.
 		Move &heavy = t.moves[ACTION_HEAVY];
 		heavy.name = "heavy";
 		heavy.kind = KIND_ATTACK;
 		heavy.ticks = 36;
 		heavy.stamina = 150;
 		heavy.steer = 0.2;
-		heavy.track_to = 255;
+		heavy.track_to = 14;
+		heavy.track_rate = 12.0;
 		heavy.root = ROOT_FACING;
 		heavy.root_from = 9;
 		heavy.root_to = 20;
@@ -273,6 +280,9 @@ struct MoveTable {
 		heavy.push = 5.0;
 		heavy.guard_cost = 220;
 		heavy.guard_push = 3.0;
+		heavy.cancel(INTO_DODGE, 22, 255, 40);
+		heavy.cancel(INTO_ABILITY, 22);
+		heavy.cancel(INTO_LIGHT, 28);
 
 		// The guard: while held, slow, facing the way of yaw.
 		Move &guard = t.moves[ACTION_BLOCK];

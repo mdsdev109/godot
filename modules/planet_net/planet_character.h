@@ -63,6 +63,10 @@ public:
 	void set_gravity(double p_gravity) { walker.gravity = p_gravity; }
 	double get_gravity() const { return walker.gravity; }
 	void set_can_climb(bool p_can) { walker.can_climb = p_can; }
+	// How many ticks a press waits for its move (the input buffer); 0 drops it. A check's control: online
+	// the server's and the client's must be the same.
+	void set_input_buffer_ticks(int p_ticks) { walker.buffer_ticks = uint8_t(CLAMP(p_ticks, 0, 255)); }
+	int get_input_buffer_ticks() const { return walker.buffer_ticks; }
 	bool get_can_climb() const { return walker.can_climb; }
 
 	void add_carve(const Vector3 &p_centre, double p_radius) {
