@@ -532,8 +532,23 @@ struct Walker {
 		Vector3 q[4];
 		Vector3 summed;
 		int reported = 0;
+		bool inside_corner = false;
 		for (int k = 0; k < 4; ++k) {
 			Vector3 face;
+			// A probe whose way out along the face is blocked -- a wall or a ceiling at an inside corner, a
+			// neighbouring block -- would start inside that and find only a face buried in it (a slab's end
+			// against the pillar it juts from, facing into the pillar), or the wall it ran into: neither is
+			// this face going on. Left out. Only for a collider, which says which way its face faces: the
+			// analytic ground, rough at this scale, blocked probes along a plain cliff and the pit's walls
+			// lost their normal.
+			Vector3 blocked;
+			Vector3 blocked_normal;
+			if (cast(p_point + p_normal * 0.02, p_point + p_normal * 0.02 + offsets[k] * h, blocked, &blocked_normal) &&
+					blocked_normal.length_squared() > 0.5) {
+				q[k] = p_point + offsets[k] * h;
+				inside_corner = true;
+				continue;
+			}
 			if (!attach(p_point + offsets[k] * h, p_normal, offsets[k], q[k], &face)) {
 				q[k] = p_point + offsets[k] * h;
 			} else if (face.length_squared() > 0.5) {
@@ -544,7 +559,10 @@ struct Walker {
 		// Colliders report their faces' normals, outward from where each probe met them: their average
 		// blends across an edge just as smoothly, and unlike the probes' positions cannot come out
 		// facing inward when a probe round a box's edge misses.
-		if (reported >= 2 && summed.length_squared() > 1e-6) {
+		// One is enough when another was left out: the probes' positions then are not all on the surface,
+		// and their cross gives back the blend that left a climber under a ceiling beside a wall holding a
+		// face 72 degrees down between the two, put back each tick into the corner it was leaving.
+		if ((reported >= 2 || (reported >= 1 && inside_corner)) && summed.length_squared() > 1e-6) {
 			return summed.normalized();
 		}
 		Vector3 n = (q[0] - q[1]).cross(q[2] - q[3]);
@@ -1180,12 +1198,23 @@ private:
 		// tick: rubber-banding 2 cm up and down for as long as the stick was held. Decided by the wall
 		// being near along the way, not by flipping once, so it does not swing back a tick later; looking
 		// out from under (a slab crawled along), forward is out already and nothing is met.
-		if (n.dot(up) < -0.5 && my > 0.0) {
+		// Turned out from under (below), it keeps on out while the stick says the same: beyond the probe's
+		// reach the way pointed back at the wall, and the climber rocked there, 0.6 m out under a ceiling.
+		const Vector3 was = p_in.velocity - n * n.dot(p_in.velocity);
+		if (n.dot(up) < -0.5 && my > 0.0 && was.length() > 0.05 && was.normalized().dot(dir.normalized()) < -0.5) {
+			dir = was.normalized() * dir.length();
+		} else if (n.dot(up) < -0.5 && my > 0.0) {
 			Vector3 corner;
 			Vector3 corner_normal;
 			if (cast(here + n * 0.02, here + n * 0.02 + dir * UNDERSIDE_WALL_REACH, corner, &corner_normal) &&
 					corner_normal.length_squared() > 0.5 && Math::abs(corner_normal.normalized().dot(up)) < UNDERSIDE_WALL_LEVEL) {
-				dir = -dir;
+				// Only the part of the way into the wall is turned away: along it, the climber goes on beside
+				// the wall; pushed straight at it, out from under. Turned round whole, a climber under a
+				// ceiling going along it and a little toward the wall went back and forth across the reach
+				// of this probe, and nowhere.
+				const Vector3 cn = corner_normal.normalized();
+				const Vector3 along = dir - cn * MIN(dir.dot(cn), 0.0);
+				dir = along.length() > 0.3 ? along.normalized() : -dir;
 			}
 		}
 		if (p_in.dash == 0) {
