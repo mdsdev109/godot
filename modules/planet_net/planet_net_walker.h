@@ -800,7 +800,12 @@ struct Walker {
 					out.action_ticks = 0;
 					out.mode = MODE_AIR;
 					out.velocity = _ease(vh, wish * run_speed, p_dt) + up * jump_speed;
-					const WalkerState launched = out;
+					// From just above the ground, as letting go of a wall starts just off it: a path that
+					// starts on the face stood on meets that face first wherever its back collides too (a
+					// cliff's skin does, so the hollow inside of one can be climbed), and took it for a
+					// ceiling, grabbing the top of the cliff from inside the rock.
+					WalkerState launched = out;
+					launched.position += up * 0.05;
 					_air(out, launched, up, wish * run_speed, p_dt);
 				} else if (p_input.buttons & BUTTON_BLOCK) {
 					// Guarding, for as long as it is held: slow, facing the way of yaw.
