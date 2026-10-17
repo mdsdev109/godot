@@ -172,6 +172,9 @@ public:
 	// move is (right, forward) in [-1, 1]; yaw is the heading in radians from the walker's reference
 	// (get_predicted_reference); buttons are PlanetNet::WalkerButton bits: 1 jump, 2 sprint, 4 let go.
 	void set_input(const Vector2 &p_move, float p_yaw, int p_buttons = 0);
+	// The ability slots held (bit k: slot k) and where an aimed one goes, as an offset from the player
+	// (zero: straight ahead). Held until changed, like the buttons. docs/COMBAT_DESIGN.md.
+	void set_ability_input(int p_abilities, const Vector3 &p_aim);
 	// Asks the server to put our player on the ground at a point (PlanetNetServer::allow_teleport).
 	// The prediction moves there at once.
 	void request_teleport(const Vector3 &p_point);
@@ -266,6 +269,8 @@ public:
 	int get_predicted_action() const { return int(predicted.action); }
 	int get_predicted_action_ticks() const { return int(predicted.action_ticks); }
 	int get_predicted_poise() const { return int(predicted.poise); }
+	// The predicted player's combat state: {poise, focus, loadout: [move ids], cooldowns: [ticks], aim}.
+	Dictionary get_predicted_combat() const { return PlanetNet::combat_of(predicted); }
 	// Climbing: the outward normal of the face held.
 	Vector3 get_predicted_normal() const { return predicted.normal; }
 	// The direction yaw is measured from at the predicted position (WalkerState::reference). A game

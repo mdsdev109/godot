@@ -263,10 +263,19 @@ void PlanetNetServer::_resolve_swings() {
 	for (KeyValue<int, Client> &C : clients) {
 		Client &client = C.value;
 		Entity *a = client.entity != 0 ? entities.getptr(client.entity) : nullptr;
-		if (a == nullptr || !walker.hitting(a->walk)) {
+		if (a == nullptr) {
 			continue;
 		}
+		const Move &m = moves().get(a->walk.action);
 		const uint32_t start = tick - a->walk.action_ticks;
+		if (m.shape == SHAPE_AREA && a->cast_start != start) {
+			// An aimed move begun: everyone who sees the caster is told where it lands, to draw it.
+			a->cast_start = start;
+			_send_cast(client.entity, *a, start);
+		}
+		if (!walker.hitting(a->walk)) {
+			continue;
+		}
 		if (a->swing_start != start) {
 			a->swing_start = start;
 			a->swing_hits.clear();
@@ -284,7 +293,9 @@ void PlanetNetServer::_resolve_swings() {
 				continue;
 			}
 			// Far off now is far off then too (the rewind is under a second): skip the history.
-			if (t.state.position.distance_squared_to(a->state.position) > 100.0) {
+			const Vector3 centre = m.shape == SHAPE_AREA ? a->walk.aim : a->state.position;
+			const double near = MAX(m.reach, m.radius) + 6.0;
+			if (t.state.position.distance_squared_to(centre) > near * near) {
 				continue;
 			}
 			const Vector3 then = get_entity_position_at(int64_t(T.key), at);
@@ -295,6 +306,30 @@ void PlanetNetServer::_resolve_swings() {
 			_strike(client.entity, *a, T.key, t, then);
 		}
 	}
+}
+
+void PlanetNetServer::_send_cast(uint64_t p_caster, const Entity &p_entity, uint32_t p_start) {
+	Writer w;
+	w.u8(MSG_CAST);
+	w.u64(p_caster);
+	w.u8(p_entity.walk.action);
+	w.f64(p_entity.walk.aim.x);
+	w.f64(p_entity.walk.aim.y);
+	w.f64(p_entity.walk.aim.z);
+	w.u32(p_start);
+	for (KeyValue<int, Client> &C : clients) {
+		const Client &c = C.value;
+		const View *seen = c.views.getptr(p_caster);
+		if (c.welcomed && (c.entity == p_caster || (seen != nullptr && !seen->removing))) {
+			link.send(C.key, CHANNEL_CONTROL, w.data(), true);
+		}
+	}
+	Dictionary cast;
+	cast["caster"] = int64_t(p_caster);
+	cast["move"] = int(p_entity.walk.action);
+	cast["aim"] = p_entity.walk.aim;
+	cast["tick"] = int(p_start);
+	emit_signal(SNAME("cast"), cast);
 }
 
 void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at) {
@@ -310,7 +345,7 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 	int damage = 0;
 	if (walks && walker.invulnerable(r_target.walk)) {
 		result = HIT_DODGED;
-	} else if (walks && walker.guards(r_target.walk, r_attacker.state.position)) {
+	} else if (walks && walker.guards(r_target.walk, m.shape == SHAPE_AREA ? r_attacker.walk.aim : r_attacker.state.position)) {
 		const uint16_t cost = m.guard_cost;
 		WalkerState ts = walker_state(r_target);
 		if (ts.stamina >= cost) {
@@ -585,6 +620,10 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				in.move.y = r.f32();
 				in.yaw = r.f32();
 				in.buttons = r.u8();
+				in.abilities = uint8_t(r.u8() & 63);
+				in.aim.x = r.f32();
+				in.aim.y = r.f32();
+				in.aim.z = r.f32();
 				const uint32_t view = r.u32();
 				if (r.ok() && input_tick > tick && input_tick <= tick + 4 * TICK_HZ) {
 					client->inputs[input_tick] = in;
@@ -1427,6 +1466,7 @@ void PlanetNetServer::_bind_methods() {
 
 	ADD_SIGNAL(MethodInfo("client_connected", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id")));
 	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));
+	ADD_SIGNAL(MethodInfo("cast", PropertyInfo(Variant::DICTIONARY, "cast")));
 	ClassDB::bind_method(D_METHOD("set_entity_health", "id", "health_max"), &PlanetNetServer::set_entity_health);
 	ClassDB::bind_method(D_METHOD("set_solid_type", "type", "radius"), &PlanetNetServer::set_solid_type);
 	ClassDB::bind_method(D_METHOD("get_solid_types"), &PlanetNetServer::get_solid_types);
@@ -1434,6 +1474,8 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_health_max", "id"), &PlanetNetServer::get_entity_health_max);
 	ClassDB::bind_method(D_METHOD("get_entity_action", "id"), &PlanetNetServer::get_entity_action);
 	ClassDB::bind_method(D_METHOD("get_entity_poise", "id"), &PlanetNetServer::get_entity_poise);
+	ClassDB::bind_method(D_METHOD("get_entity_combat", "id"), &PlanetNetServer::get_entity_combat);
+	ClassDB::bind_method(D_METHOD("set_entity_loadout", "id", "moves"), &PlanetNetServer::set_entity_loadout);
 	ClassDB::bind_method(D_METHOD("set_player_hits", "on"), &PlanetNetServer::set_player_hits);
 	ClassDB::bind_method(D_METHOD("get_player_hits"), &PlanetNetServer::get_player_hits);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "player_hits"), "set_player_hits", "get_player_hits");

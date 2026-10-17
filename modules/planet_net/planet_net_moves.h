@@ -327,6 +327,97 @@ struct MoveTable {
 		climb_jump.name = "climb_jump";
 		climb_jump.kind = KIND_WALL;
 
+		// Abilities (COMBAT_DESIGN.md section 4): focus and a cooldown, not the weapon's. Each ability's
+		// windup is long enough to be seen and answered through a connection's latency (section 7): 300 ms
+		// or more for anything meant to be dodged on sight.
+
+		// Ember Burst: a burst on the ground where it is aimed, up to 14 m off. Cast walking, at half
+		// speed, the legs free; any hit interrupts it. Live 400 ms after it starts -- its area is drawn on
+		// the ground for everyone from the first tick.
+		Move &ember = t.moves[ACTION_EMBER];
+		ember.name = "ember_burst";
+		ember.kind = KIND_ABILITY;
+		ember.ticks = 26;
+		ember.focus = 300;
+		ember.cooldown = 240;
+		ember.steer = 0.5;
+		ember.upper_body = true;
+		ember.fragile = true;
+		ember.shape = SHAPE_AREA;
+		ember.hit_from = 12;
+		ember.hit_to = 14;
+		ember.radius = 2.5;
+		ember.range = 14.0;
+		ember.height = 2.5;
+		ember.damage = 20;
+		ember.poise_damage = 45;
+		ember.reaction = REACT_STAGGER;
+		ember.push = 3.0;
+		ember.guard_cost = 120;
+		ember.guard_push = 2.0;
+		ember.cancel(INTO_DODGE, 14);
+		ember.cancel(INTO_LIGHT | INTO_HEAVY, 18);
+
+		// Gust: a cone 4 m deep in front that blows what it catches back 2-3 m. Quick and mobile, little
+		// damage: for making room. Fragile.
+		Move &gust = t.moves[ACTION_GUST];
+		gust.name = "gust";
+		gust.kind = KIND_ABILITY;
+		gust.ticks = 18;
+		gust.focus = 200;
+		gust.cooldown = 180;
+		gust.steer = 0.6;
+		gust.upper_body = true;
+		gust.fragile = true;
+		gust.track_to = 6;
+		gust.track_rate = 25.0;
+		gust.shape = SHAPE_ARC;
+		gust.hit_from = 6;
+		gust.hit_to = 8;
+		gust.reach = 4.0;
+		gust.arc = 40.0;
+		gust.height = 2.0;
+		gust.damage = 5;
+		gust.poise_damage = 30;
+		gust.reaction = REACT_FLINCH;
+		gust.push = 8.0;
+		gust.guard_cost = 60;
+		gust.guard_push = 5.0;
+		gust.cancel(INTO_DODGE, 8);
+		gust.cancel(INTO_LIGHT | INTO_HEAVY, 10);
+
+		// Leaping Slam: a leap of about 2.3 m that lands crushing everything within 2.4 m -- knocked down
+		// if its poise breaks. Committed: no steering, tracking only through the crouch, armoured from
+		// the leap through the landing. Stamina as well as focus.
+		Move &slam = t.moves[ACTION_SLAM];
+		slam.name = "leaping_slam";
+		slam.kind = KIND_ABILITY;
+		slam.ticks = 34;
+		slam.stamina = 120;
+		slam.focus = 250;
+		slam.cooldown = 360;
+		slam.track_to = 8;
+		slam.track_rate = 15.0;
+		slam.root = ROOT_FACING;
+		slam.root_from = 8;
+		slam.root_to = 18;
+		slam.root_speed = 7.0;
+		slam.armour = 60;
+		slam.armour_from = 6;
+		slam.armour_to = 22;
+		slam.shape = SHAPE_AROUND;
+		slam.hit_from = 18;
+		slam.hit_to = 21;
+		slam.radius = 2.4;
+		slam.height = 1.8;
+		slam.damage = 30;
+		slam.poise_damage = 90;
+		slam.reaction = REACT_KNOCKDOWN;
+		slam.push = 6.0;
+		slam.guard_cost = 260;
+		slam.guard_push = 4.0;
+		slam.cancel(INTO_DODGE, 28);
+
 		t.hash = t.compute_hash();
 		return t;
 	}

@@ -38,6 +38,8 @@ void PlanetCharacter::step(const Vector2 &p_move, float p_yaw, int p_buttons, do
 	in.move = Vector2(float(p_move.x), float(p_move.y));
 	in.yaw = p_yaw;
 	in.buttons = uint8_t(p_buttons);
+	in.abilities = ability_input;
+	in.aim = aim_input;
 	state = walker.step(state, in, p_dt);
 }
 
@@ -155,6 +157,12 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);
 	ClassDB::bind_method(D_METHOD("react", "push", "move"), &PlanetCharacter::react);
 	ClassDB::bind_method(D_METHOD("take_hit", "attack", "away"), &PlanetCharacter::take_hit);
+	ClassDB::bind_method(D_METHOD("set_ability_input", "abilities", "aim"), &PlanetCharacter::set_ability_input);
+	ClassDB::bind_method(D_METHOD("get_combat"), &PlanetCharacter::get_combat);
+	ClassDB::bind_method(D_METHOD("get_focus_max"), &PlanetCharacter::get_focus_max);
+	ClassDB::bind_method(D_METHOD("set_focus", "focus"), &PlanetCharacter::set_focus);
+	ClassDB::bind_method(D_METHOD("set_loadout", "moves"), &PlanetCharacter::set_loadout);
+	ClassDB::bind_method(D_METHOD("clear_cooldowns"), &PlanetCharacter::clear_cooldowns);
 	ClassDB::bind_method(D_METHOD("get_poise"), &PlanetCharacter::get_poise);
 	ClassDB::bind_method(D_METHOD("get_poise_max"), &PlanetCharacter::get_poise_max);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_info", "id"), &PlanetCharacter::get_move_info);

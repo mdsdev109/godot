@@ -156,6 +156,7 @@ private:
 		// The swing in progress (by the tick it started) and what it has already struck: one blow each.
 		uint32_t swing_start = 0;
 		LocalVector<uint64_t> swing_hits;
+		uint32_t cast_start = UINT32_MAX; // the aimed move last announced (MSG_CAST), by its start tick
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -208,6 +209,7 @@ private:
 	void _record_history(Entity &r_entity);
 	void _resolve_swings();
 	void _strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at);
+	void _send_cast(uint64_t p_caster, const Entity &p_entity, uint32_t p_start);
 
 	// Persistence: see save_world().
 	String world_path;
@@ -343,6 +345,20 @@ public:
 	int get_entity_poise(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->walk.poise) : 0;
+	}
+	// A player's combat state: {poise, focus, loadout, cooldowns, aim} (docs/COMBAT_DESIGN.md).
+	Dictionary get_entity_combat(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? PlanetNet::combat_of(e->walk) : Dictionary();
+	}
+	// A player's abilities, by move id per slot (0: empty). Its client predicts with them from the next
+	// snapshot on.
+	void set_entity_loadout(int64_t p_id, const PackedInt32Array &p_moves) {
+		Entity *e = entities.getptr(uint64_t(p_id));
+		ERR_FAIL_NULL(e);
+		for (int k = 0; k < PlanetNet::ABILITY_SLOTS; ++k) {
+			e->walk.loadout[k] = k < p_moves.size() ? uint8_t(CLAMP(p_moves[k], 0, 255)) : 0;
+		}
 	}
 
 	// Bodies the walkers cannot pass through (Walker::body_feet): entities of these types, each type its

@@ -105,6 +105,12 @@ void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw, int p_button
 	input.buttons = uint8_t(p_buttons);
 }
 
+void PlanetNetClient::set_ability_input(int p_abilities, const Vector3 &p_aim) {
+	// As the server receives them: the slots a byte, the aim three float32s.
+	input.abilities = uint8_t(p_abilities & 63);
+	input.aim = Vector3(float(p_aim.x), float(p_aim.y), float(p_aim.z));
+}
+
 void PlanetNetClient::set_look(int64_t p_look) {
 	look = uint64_t(p_look);
 	if (welcomed) {
@@ -414,6 +420,10 @@ void PlanetNetClient::_send_input() {
 		w.f32(frames[i].input.move.y);
 		w.f32(frames[i].input.yaw);
 		w.u8(frames[i].input.buttons);
+		w.u8(frames[i].input.abilities);
+		w.f32(float(frames[i].input.aim.x));
+		w.f32(float(frames[i].input.aim.y));
+		w.f32(float(frames[i].input.aim.z));
 		w.u32(frames[i].view);
 	}
 	link.send(server_peer, CHANNEL_STATE, w.data(), false);
@@ -473,6 +483,20 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			hit["reaction"] = int(r.u8());
 			if (r.ok()) {
 				emit_signal(SNAME("hit"), hit);
+			}
+		} break;
+		case MSG_CAST: {
+			Dictionary cast;
+			cast["caster"] = int64_t(r.u64());
+			cast["move"] = int(r.u8());
+			Vector3 aim;
+			aim.x = r.f64();
+			aim.y = r.f64();
+			aim.z = r.f64();
+			cast["aim"] = aim;
+			cast["tick"] = int(r.u32());
+			if (r.ok()) {
+				emit_signal(SNAME("cast"), cast);
 			}
 		} break;
 		case MSG_WORLD_CHANGE: {
@@ -744,6 +768,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_predicted_action"), &PlanetNetClient::get_predicted_action);
 	ClassDB::bind_method(D_METHOD("get_predicted_action_ticks"), &PlanetNetClient::get_predicted_action_ticks);
 	ClassDB::bind_method(D_METHOD("get_predicted_poise"), &PlanetNetClient::get_predicted_poise);
+	ClassDB::bind_method(D_METHOD("set_ability_input", "abilities", "aim"), &PlanetNetClient::set_ability_input);
+	ClassDB::bind_method(D_METHOD("get_predicted_combat"), &PlanetNetClient::get_predicted_combat);
 	ClassDB::bind_method(D_METHOD("get_predicted_normal"), &PlanetNetClient::get_predicted_normal);
 	ClassDB::bind_method(D_METHOD("get_local_entity_id"), &PlanetNetClient::get_local_entity_id);
 	ClassDB::bind_method(D_METHOD("get_server_time_estimate"), &PlanetNetClient::get_server_time_estimate);
@@ -797,4 +823,5 @@ void PlanetNetClient::_bind_methods() {
 	// A swing the server judged, involving something this client sees: {attacker, target, result
 	// (PlanetNet::HitResult: 1 struck, 2 blocked, 3 guard broken, 4 dodged), attack, damage, health, point}.
 	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));
+	ADD_SIGNAL(MethodInfo("cast", PropertyInfo(Variant::DICTIONARY, "cast")));
 }

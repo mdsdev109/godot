@@ -44,6 +44,8 @@
 #include "core/math/vector3.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/local_vector.h"
+#include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 #include "scene/resources/3d/planet_field_3d.h"
 #include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
 #include "servers/physics_3d/physics_server_3d.h"
@@ -81,6 +83,10 @@ struct WalkerInput {
 	Vector2 move; // (right, forward), each in [-1, 1]
 	float yaw = 0.f; // heading in radians from the walker's reference direction
 	uint8_t buttons = 0; // WalkerButton bits held this tick
+	// The ability slots held (bit k: slot k, 0..5), and where an aimed ability goes: an offset from the
+	// walker's position (zero: straight ahead).
+	uint8_t abilities = 0;
+	Vector3 aim;
 };
 
 struct WalkerState {
@@ -116,6 +122,12 @@ struct WalkerState {
 	// hit's reaction lands and it is full again; it refills after poise_rest ticks without a hit.
 	uint16_t poise = 60;
 	uint8_t poise_rest = 0;
+	// Abilities (COMBAT_DESIGN.md section 4): focus, what they spend besides stamina; each slot's move and
+	// the ticks before it may start it again; the ability buttons held last tick.
+	uint16_t focus = 1000;
+	uint8_t loadout[ABILITY_SLOTS] = { ACTION_EMBER, ACTION_GUST, ACTION_SLAM, 0, 0, 0 };
+	uint16_t cooldown[ABILITY_SLOTS] = {};
+	uint8_t ability_latch = 0;
 };
 
 // The walker's state on the wire beyond position and velocity, in one place for the server's writer
@@ -144,6 +156,12 @@ inline void write_walk(W &w, const WalkerState &s) {
 	w.u8(s.buffer_ticks);
 	w.u16(s.poise);
 	w.u8(s.poise_rest);
+	w.u16(s.focus);
+	for (int k = 0; k < ABILITY_SLOTS; ++k) {
+		w.u8(s.loadout[k]);
+		w.u16(s.cooldown[k]);
+	}
+	w.u8(s.ability_latch);
 }
 
 template <typename R>
@@ -169,6 +187,29 @@ inline void read_walk(R &r, WalkerState &s) {
 	s.buffer_ticks = r.u8();
 	s.poise = r.u16();
 	s.poise_rest = r.u8();
+	s.focus = r.u16();
+	for (int k = 0; k < ABILITY_SLOTS; ++k) {
+		s.loadout[k] = r.u8();
+		s.cooldown[k] = r.u16();
+	}
+	s.ability_latch = r.u8();
+}
+
+// The combat part of a walker state, for scripts (PlanetCharacter, PlanetNetClient).
+inline Dictionary combat_of(const WalkerState &p_state) {
+	Dictionary d;
+	d["poise"] = int(p_state.poise);
+	d["focus"] = int(p_state.focus);
+	Array loadout;
+	Array cooldowns;
+	for (int k = 0; k < ABILITY_SLOTS; ++k) {
+		loadout.push_back(int(p_state.loadout[k]));
+		cooldowns.push_back(int(p_state.cooldown[k]));
+	}
+	d["loadout"] = loadout;
+	d["cooldowns"] = cooldowns;
+	d["aim"] = p_state.aim;
+	return d;
 }
 
 // Whether two walker states are the same to the bit: everything a step reads. What a prediction must
@@ -178,7 +219,8 @@ inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 			a.mode == b.mode && a.normal == b.normal && a.flags == b.flags && a.dash == b.dash &&
 			a.stamina == b.stamina && a.rest == b.rest && a.action == b.action && a.action_ticks == b.action_ticks &&
 			a.aim == b.aim && a.buffer == b.buffer && a.buffer_ticks == b.buffer_ticks && a.poise == b.poise &&
-			a.poise_rest == b.poise_rest;
+			a.poise_rest == b.poise_rest && a.focus == b.focus && a.ability_latch == b.ability_latch &&
+			std::memcmp(a.loadout, b.loadout, sizeof(a.loadout)) == 0 && std::memcmp(a.cooldown, b.cooldown, sizeof(a.cooldown)) == 0;
 }
 
 // What the body is doing, for drawing it on other machines: the mode in the low four bits, the move
@@ -259,6 +301,11 @@ struct Walker {
 	uint16_t poise_max = 60;
 	uint8_t poise_rest_ticks = 60;
 	uint16_t poise_regen = 2;
+	// Focus: a full bar 1000, back from empty in a little over 8 s.
+	uint16_t focus_max = 1000;
+	uint16_t focus_regen = 4;
+	// An aimed ability with no aim lands this far ahead (or at its range, if shorter).
+	double aim_ahead = 6.0;
 
 	// Down.
 	Vector3 gravity_centre;
@@ -781,14 +828,22 @@ struct Walker {
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
-		// Poise refills after a rest without hits.
+		// Poise refills after a rest without hits; focus all the time; cooldowns run down.
 		if (out.poise_rest > 0) {
 			--out.poise_rest;
 		} else if (out.poise < poise_max) {
 			out.poise = uint16_t(MIN(uint32_t(poise_max), uint32_t(out.poise) + poise_regen));
 		}
+		out.focus = uint16_t(MIN(uint32_t(focus_max), uint32_t(out.focus) + focus_regen));
+		for (int k = 0; k < ABILITY_SLOTS; ++k) {
+			if (out.cooldown[k] > 0) {
+				--out.cooldown[k];
+			}
+		}
+		const uint8_t pressed_abilities = p_input.abilities & ~p_state.ability_latch;
+		out.ability_latch = p_input.abilities;
 		// The input buffer: this tick's press, or one still waiting.
-		const uint8_t pressed_intent = _intent(pressed);
+		const uint8_t pressed_intent = _intent(pressed, pressed_abilities);
 		if (pressed_intent != INTENT_NONE) {
 			out.buffer = pressed_intent;
 			out.buffer_ticks = buffer_ticks;
@@ -828,8 +883,8 @@ struct Walker {
 				const Vector3 vh = p_state.velocity - up * p_state.velocity.dot(up);
 				const bool locked = (p_input.buttons & BUTTON_LOCK) && !sprinting;
 				const Move &now = move_of(p_state);
-				const Ground g{ up, forward, wish, vh, locked, moving };
-				const bool can_start = !now.committed() && intent != INTENT_NONE && _affords(p_state, moves().get(_intent_move(p_state, intent)), 0);
+				const Ground g{ up, forward, wish, vh, locked, moving, p_input.aim };
+				const bool can_start = !now.committed() && intent != INTENT_NONE && _affords(out, intent, _intent_move(p_state, intent), 0);
 				if (!now.committed() && intent != INTENT_NONE && !can_start) {
 					// Free to move but unable to pay: the press is dropped, not kept until stamina comes back --
 					// the buffer is for presses a move is holding up.
@@ -838,14 +893,14 @@ struct Walker {
 				if (now.committed()) {
 					// In a move: what a press may start part way through it (a cancel window), or on with it.
 					const uint8_t next = _cancel_into(now, p_state, intent);
-					if (next != ACTION_NONE && _affords(p_state, moves().get(next), _cancel_extra(now, p_state, intent))) {
-						spent = _start_move(out, p_state, next, _cancel_extra(now, p_state, intent), g, p_dt);
+					if (next != ACTION_NONE && _affords(out, intent, next, _cancel_extra(now, p_state, intent))) {
+						spent = _start_move(out, p_state, next, intent, _cancel_extra(now, p_state, intent), g, p_dt);
 						used_intent = true;
 					} else {
 						_run_move(out, p_state, now, g, p_dt);
 					}
 				} else if (can_start) {
-					spent = _start_move(out, p_state, _intent_move(p_state, intent), 0, g, p_dt);
+					spent = _start_move(out, p_state, _intent_move(p_state, intent), intent, 0, g, p_dt);
 					used_intent = true;
 				} else if (pressed & BUTTON_JUMP) {
 					out.action = ACTION_NONE;
@@ -908,12 +963,19 @@ private:
 		Vector3 vh; // the ground velocity
 		bool locked;
 		bool moving;
+		Vector3 aim; // an aimed ability's: offset from the position (WalkerInput::aim)
 	};
 
-	// What this tick's presses ask for, the strongest first: a dodge, a light, a heavy.
-	static uint8_t _intent(uint8_t p_pressed) {
+	// What this tick's presses ask for, the strongest first: a dodge, an ability (the lowest slot), a
+	// light, a heavy.
+	static uint8_t _intent(uint8_t p_pressed, uint8_t p_abilities) {
 		if (p_pressed & BUTTON_DODGE) {
 			return INTENT_DODGE;
+		}
+		for (int k = 0; k < ABILITY_SLOTS; ++k) {
+			if (p_abilities & (1u << k)) {
+				return uint8_t(INTENT_ABILITY + k);
+			}
 		}
 		if (p_pressed & BUTTON_LIGHT) {
 			return INTENT_LIGHT;
@@ -934,6 +996,10 @@ private:
 			case INTENT_HEAVY:
 				return ACTION_HEAVY;
 			default:
+				if (p_intent >= INTENT_ABILITY && p_intent < INTENT_ABILITY + ABILITY_SLOTS) {
+					const uint8_t id = p_state.loadout[p_intent - INTENT_ABILITY];
+					return moves().get(id).kind == KIND_ABILITY ? id : uint8_t(ACTION_NONE);
+				}
 				return ACTION_NONE;
 		}
 	}
@@ -972,30 +1038,72 @@ private:
 		return c != nullptr ? c->extra_stamina : 0;
 	}
 
-	// Whether a move can be started: its stamina (plus a cancel's extra), not exhausted.
-	bool _affords(const WalkerState &p_state, const Move &p_move, uint16_t p_extra) const {
-		if (p_move.kind == KIND_NONE) {
+	// Whether the move an intent asks for can be started: its stamina (plus a cancel's extra) with the
+	// walker not exhausted, its focus, and an ability's slot off cooldown.
+	bool _affords(const WalkerState &p_state, uint8_t p_intent, uint8_t p_id, uint16_t p_extra) const {
+		const Move &m = moves().get(p_id);
+		if (m.kind == KIND_NONE) {
 			return false;
 		}
-		const uint32_t stamina = uint32_t(p_move.stamina) + p_extra;
-		return p_state.stamina >= stamina && !(p_state.flags & FLAG_EXHAUSTED);
+		const uint32_t stamina = uint32_t(m.stamina) + p_extra;
+		if (stamina > 0 && (p_state.stamina < stamina || (p_state.flags & FLAG_EXHAUSTED))) {
+			return false;
+		}
+		if (p_state.focus < m.focus) {
+			return false;
+		}
+		if (p_intent >= INTENT_ABILITY && p_intent < INTENT_ABILITY + ABILITY_SLOTS && p_state.cooldown[p_intent - INTENT_ABILITY] > 0) {
+			return false;
+		}
+		return true;
 	}
 
-	// Starts a move: pays for it, faces the way it goes (the target locked on, else the stick, else as
-	// it faced), and runs its first tick. Returns true (stamina spent).
-	bool _start_move(WalkerState &r_out, const WalkerState &p_in, uint8_t p_id, uint16_t p_extra, const Ground &p_g, double p_dt) const {
+	// Starts a move: pays for it -- stamina, focus, an ability's cooldown -- faces the way it goes (an
+	// aimed one toward its aim, else the target locked on, else the stick, else as it faced), and runs
+	// its first tick. Returns whether it spent stamina.
+	bool _start_move(WalkerState &r_out, const WalkerState &p_in, uint8_t p_id, uint8_t p_intent, uint16_t p_extra, const Ground &p_g, double p_dt) const {
 		const Move &m = moves().get(p_id);
 		r_out.action = p_id;
 		r_out.action_ticks = 0;
-		_spend(r_out, uint16_t(MIN(uint32_t(m.stamina) + p_extra, 65535u)));
-		const Vector3 face = m.root == ROOT_ROLL ? (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up))
-												: (p_g.locked ? p_g.forward : (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up)));
+		const uint32_t stamina = uint32_t(m.stamina) + p_extra;
+		if (stamina > 0) {
+			_spend(r_out, uint16_t(MIN(stamina, 65535u)));
+		}
+		r_out.focus = r_out.focus > m.focus ? uint16_t(r_out.focus - m.focus) : uint16_t(0);
+		if (p_intent >= INTENT_ABILITY && p_intent < INTENT_ABILITY + ABILITY_SLOTS) {
+			r_out.cooldown[p_intent - INTENT_ABILITY] = m.cooldown;
+		}
+		Vector3 face = m.root == ROOT_ROLL ? (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up))
+										   : (p_g.locked ? p_g.forward : (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up)));
+		if (m.shape == SHAPE_AREA) {
+			// Where it lands: the aim, flattened and kept within range; with none, straight ahead.
+			Vector3 off = p_g.aim;
+			const double rise = off.dot(p_g.up);
+			Vector3 flat = off - p_g.up * rise;
+			const double far = flat.length();
+			if (far < 0.01) {
+				flat = face * MIN(aim_ahead, m.range);
+				off = flat;
+			} else if (far > m.range) {
+				off = flat * (m.range / far) + p_g.up * rise;
+				flat = flat * (m.range / far);
+			}
+			r_out.aim = p_in.position + off;
+			if (flat.length_squared() > 1e-6) {
+				face = flat.normalized();
+			}
+		}
+		return _begin(r_out, p_in, p_id, face, p_g, p_dt) || stamina > 0;
+	}
+
+	bool _begin(WalkerState &r_out, const WalkerState &p_in, uint8_t p_id, const Vector3 &face, const Ground &p_g, double p_dt) const {
+		const Move &m = moves().get(p_id);
 		WalkerState from = p_in;
 		from.action = p_id;
 		from.action_ticks = 0;
 		from.rotation = facing_rotation(face, p_g.up);
 		_run_move(r_out, from, m, p_g, p_dt, &face);
-		return true;
+		return false;
 	}
 
 	// One tick of a move: steering, tracking and its own motion; over at its last tick. `p_along`, on the

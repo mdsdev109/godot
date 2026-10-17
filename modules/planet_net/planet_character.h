@@ -43,6 +43,8 @@ class PlanetCharacter : public RefCounted {
 
 	PlanetNet::Walker walker;
 	PlanetNet::WalkerState state;
+	uint8_t ability_input = 0;
+	Vector3 aim_input;
 
 protected:
 	static void _bind_methods();
@@ -134,6 +136,28 @@ public:
 	// 32 heavy, 64 block (held), 128 lock on (held: face yaw). Inputs are rounded to float32 as the
 	// network rounds them.
 	void step(const Vector2 &p_move, float p_yaw, int p_buttons, double p_dt);
+	// Abilities (docs/COMBAT_DESIGN.md): the slots held (bit k: slot k) and where an aimed one goes, an
+	// offset from the character (zero: straight ahead). Held until changed, like buttons; rounded to
+	// float32 as the network rounds them.
+	void set_ability_input(int p_abilities, const Vector3 &p_aim) {
+		ability_input = uint8_t(p_abilities & 63);
+		aim_input = Vector3(float(p_aim.x), float(p_aim.y), float(p_aim.z));
+	}
+	// {poise, focus, loadout: [move ids], cooldowns: [ticks], aim}.
+	Dictionary get_combat() const { return PlanetNet::combat_of(state); }
+	int get_focus_max() const { return int(walker.focus_max); }
+	void set_focus(int p_focus) { state.focus = uint16_t(CLAMP(p_focus, 0, int(walker.focus_max))); }
+	// The abilities in the slots, by move id (0: empty). Offline; online the server's.
+	void set_loadout(const PackedInt32Array &p_moves) {
+		for (int k = 0; k < PlanetNet::ABILITY_SLOTS; ++k) {
+			state.loadout[k] = k < p_moves.size() ? uint8_t(CLAMP(p_moves[k], 0, 255)) : 0;
+		}
+	}
+	void clear_cooldowns() {
+		for (int k = 0; k < PlanetNet::ABILITY_SLOTS; ++k) {
+			state.cooldown[k] = 0;
+		}
+	}
 
 	Vector3 get_position() const { return state.position; }
 	Vector3 get_velocity() const { return state.velocity; }
