@@ -87,6 +87,7 @@ enum WalkerAction : uint8_t {
 	ACTION_BLOCK = 5,
 	ACTION_STAGGER = 6, // hit: knocked back, no control (set by the server: Walker::recoil)
 	ACTION_BLOCKED = 7, // a hit taken on the guard: pushed back a little
+	ACTION_CLIMB_JUMP = 8, // a climb jump, a dyno: the wind-up and the lunge (Walker::dash_windup, dash_ticks)
 };
 
 struct WalkerInput {
@@ -158,9 +159,11 @@ struct Walker {
 	double jump_speed = 7.0;
 	double gravity = 20.0;
 	double air_accel = 6.0;
-	// A climb jump: dash_ticks at dash_speed along the face (1.8 m in 0.3 s).
+	// A climb jump: a wind-up of dash_windup ticks holding still -- the body loading, as a climber's
+	// does before a dyno -- then dash_ticks at dash_speed along the face (1.8 m in 0.3 s).
 	double dash_speed = 6.0;
 	uint8_t dash_ticks = 9;
+	uint8_t dash_windup = 4;
 	// The walk limit as rise over run: tan(45).
 	double walk_slope = 1.0;
 	// How high a step is walked up rather than climbed, and how far in front of the feet the body
@@ -700,6 +703,11 @@ struct Walker {
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
+		// A climb jump is over once off the wall, however it left it.
+		if (out.action == ACTION_CLIMB_JUMP && (p_state.mode != MODE_CLIMB || p_state.dash == 0)) {
+			out.action = ACTION_NONE;
+			out.action_ticks = 0;
+		}
 		bool spent = false;
 		switch (p_state.mode) {
 			case MODE_AIR:
@@ -1185,8 +1193,11 @@ private:
 		}
 		bool spent = false;
 		if ((p_pressed & BUTTON_JUMP) && p_in.dash == 0 && p_in.stamina >= climb_jump_cost) {
-			// A climb jump: a lunge along the face, the way the stick points (onward if it points nowhere).
-			r_out.dash = dash_ticks;
+			// A climb jump: a wind-up, then a lunge along the face, the way the stick points (onward if it
+			// points nowhere). Its action says so to whoever draws it, here and on other machines.
+			r_out.dash = dash_ticks + dash_windup;
+			r_out.action = ACTION_CLIMB_JUMP;
+			r_out.action_ticks = 0;
 			spent = _spend(r_out, climb_jump_cost);
 		}
 		double my = p_my;
@@ -1194,11 +1205,23 @@ private:
 		double rate = climb_speed;
 		if (r_out.dash > 0) {
 			--r_out.dash;
-			rate = dash_speed;
-			if (amount < 1e-9) {
-				my = 1.0;
+			if (r_out.action == ACTION_CLIMB_JUMP && r_out.action_ticks < 255) {
+				++r_out.action_ticks;
 			}
-			amount = 1.0;
+			if (r_out.dash >= dash_ticks) {
+				// Winding up: held still.
+				amount = 0.0;
+			} else {
+				rate = dash_speed;
+				if (amount < 1e-9) {
+					my = 1.0;
+				}
+				amount = 1.0;
+			}
+			if (r_out.dash == 0 && r_out.action == ACTION_CLIMB_JUMP) {
+				r_out.action = ACTION_NONE;
+				r_out.action_ticks = 0;
+			}
 		}
 		r_out.position = here;
 		r_out.velocity = Vector3();
