@@ -558,10 +558,38 @@ struct Walker {
 		return hit.distance_to(p_to) <= p_slack;
 	}
 
+	// Whether a point is inside something solid: the analytic ground, or a collider on the walker's layers
+	// (a trimesh, having no inside, never is).
+	bool solid_at(const Vector3 &p_point) const {
+		if (inside(p_point)) {
+			return true;
+		}
+		if (!space.is_valid() || PhysicsServer3D::get_singleton() == nullptr) {
+			return false;
+		}
+		PhysicsDirectSpaceState3D *state = PhysicsServer3D::get_singleton()->space_get_direct_state(space);
+		if (state == nullptr) {
+			return false;
+		}
+		PS3DT::PointParameters params;
+		params.position = p_point;
+		params.exclude = exclude;
+		params.collision_mask = collision_mask;
+		PS3DT::ShapeResult result;
+		return state->intersect_point(params, &result, 1) != 0;
+	}
+
 	// Whether a caster standing at `p_feet` sees `p_point` to cast an aimed ability at: from its eye to just
-	// over the point.
+	// over the point, and that point, drawn back toward the eye a little, not inside anything -- the line's
+	// slack would otherwise see a point just inside a wall's face, and cast through to its far side.
 	bool can_cast_from(const Vector3 &p_feet, const Vector3 &p_point) const {
-		return sees(p_feet + up_at(p_feet) * eye_height, p_point + up_at(p_point) * cast_lift, sight_slack);
+		const Vector3 eye = p_feet + up_at(p_feet) * eye_height;
+		const Vector3 to = p_point + up_at(p_point) * cast_lift;
+		const Vector3 back = eye - to;
+		if (solid_at(back.length() > 0.15 ? to + back.normalized() * 0.15 : to)) {
+			return false;
+		}
+		return sees(eye, to, sight_slack);
 	}
 
 	// Whether the ground at a point can be climbed. Materials and objects that cannot will answer here.
