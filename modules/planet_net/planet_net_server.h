@@ -214,6 +214,7 @@ private:
 	void _resolve_swings();
 	void _strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at);
 	void _send_cast(uint64_t p_caster, const Entity &p_entity, uint32_t p_start);
+	void _send_health(const Entity &p_entity);
 
 	// Persistence: see save_world().
 	String world_path;
@@ -304,6 +305,15 @@ public:
 	double get_time_ticks() const { return double(tick) + accumulator * PlanetNet::TICK_HZ; }
 
 	int64_t create_entity(int p_type, const Vector3 &p_position);
+	// An enemy (docs/COMBAT.md, "The bandit"): a walker like a player's, stepped every tick from what
+	// set_entity_input last set -- a script's brain on the host -- judged by the same rules, its moves
+	// against players, players' against it. Not saved. At 0 health it is down for good (ACTION_DEATH)
+	// and `entity_died` says so; what follows is the script's.
+	int64_t create_npc(int p_type, const Vector3 &p_position);
+	void set_entity_input(int64_t p_id, const Vector2 &p_move, float p_yaw, int p_buttons, int p_abilities, const Vector3 &p_aim);
+	// A walker's state for scripts: {position, velocity, rotation, up, reference, mode, action,
+	// action_ticks, stamina, poise, focus, loadout, cooldowns, aim, health, health_max, dead}.
+	Dictionary get_entity_walker(int64_t p_id) const;
 	void destroy_entity(int64_t p_id);
 	bool has_entity(int64_t p_id) const { return entities.has(uint64_t(p_id)); }
 	PackedInt64Array get_entity_ids() const;

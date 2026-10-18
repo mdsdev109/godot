@@ -59,7 +59,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 15;
+constexpr uint16_t PROTOCOL_VERSION = 16;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -77,7 +77,7 @@ enum MessageType : uint8_t {
 	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
 	//               [if nonzero: f64 x3 your position, f64 x3 velocity, f64 x3 walk reference,
 	//                u8 walk mode, u8 button latch, f64 x3 climb normal, u8 walk flags, u8 dash ticks,
-	//                u16 stamina, u8 stamina rest, u8 action, u8 action ticks, u8 teleports applied],
+	//                ... the rest of the walker's state (write_walk), u8 teleports applied],
 	//               u16 n, n x record,
 	//               u16 m, m x u16 removed handle
 	MSG_TELEPORT, // client -> server, control: f64 x3 point. Put me on the ground there (if allowed).
@@ -87,6 +87,7 @@ enum MessageType : uint8_t {
 	//          u8 the reaction move it caused (0: none -- its poise took it)
 	MSG_CAST, // server -> client, control: u64 caster, u8 move, f64 x3 where it lands, u32 tick it started.
 	//           An aimed move (SHAPE_AREA) begun, for drawing its area through the windup.
+	MSG_HEALTH, // server -> client, control: u16 health, u16 health max. The player's own, when it changes.
 };
 
 // What a swing did to what it reached (MSG_HIT): HitResult, planet_net_moves.h.

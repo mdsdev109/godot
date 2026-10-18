@@ -91,6 +91,9 @@ private:
 	// The server's move table was not this client's, and it left (planet_net_moves.h). A test sets the
 	// hash it claims to have, to see that happen.
 	bool move_table_refused = false;
+	// The player's health, as the server last said (MSG_HEALTH; not predicted: blows are the server's).
+	int health = 0;
+	int health_max = 0;
 	uint64_t move_hash_override = 0;
 	uint64_t local_entity = 0;
 	uint16_t server_id = 0;
@@ -269,6 +272,8 @@ public:
 	int get_predicted_action() const { return int(predicted.action); }
 	int get_predicted_action_ticks() const { return int(predicted.action_ticks); }
 	int get_predicted_poise() const { return int(predicted.poise); }
+	int get_health() const { return health; }
+	int get_health_max() const { return health_max; }
 	// The predicted player's combat state: {poise, focus, loadout: [move ids], cooldowns: [ticks], aim}.
 	Dictionary get_predicted_combat() const { return PlanetNet::combat_of(predicted); }
 	// Climbing: the outward normal of the face held.

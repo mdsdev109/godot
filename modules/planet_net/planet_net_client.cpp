@@ -485,6 +485,14 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 				emit_signal(SNAME("hit"), hit);
 			}
 		} break;
+		case MSG_HEALTH: {
+			const uint16_t h = r.u16();
+			const uint16_t m = r.u16();
+			if (r.ok()) {
+				health = h;
+				health_max = m;
+			}
+		} break;
 		case MSG_CAST: {
 			Dictionary cast;
 			cast["caster"] = int64_t(r.u64());
@@ -768,6 +776,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_predicted_action"), &PlanetNetClient::get_predicted_action);
 	ClassDB::bind_method(D_METHOD("get_predicted_action_ticks"), &PlanetNetClient::get_predicted_action_ticks);
 	ClassDB::bind_method(D_METHOD("get_predicted_poise"), &PlanetNetClient::get_predicted_poise);
+	ClassDB::bind_method(D_METHOD("get_health"), &PlanetNetClient::get_health);
+	ClassDB::bind_method(D_METHOD("get_health_max"), &PlanetNetClient::get_health_max);
 	ClassDB::bind_method(D_METHOD("set_ability_input", "abilities", "aim"), &PlanetNetClient::set_ability_input);
 	ClassDB::bind_method(D_METHOD("get_predicted_combat"), &PlanetNetClient::get_predicted_combat);
 	ClassDB::bind_method(D_METHOD("get_predicted_normal"), &PlanetNetClient::get_predicted_normal);
