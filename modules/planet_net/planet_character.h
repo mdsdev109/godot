@@ -220,6 +220,15 @@ public:
 		return d;
 	}
 	// Down for good (ACTION_DEATH) or up again: the owner of the body decides when it dies.
+	// Never climbs (FLAG_NO_CLIMB): walls stop it, as an unclimbable face stops anyone. An NPC's.
+	void set_no_climb(bool p_no) {
+		if (p_no) {
+			state.flags |= PlanetNet::FLAG_NO_CLIMB;
+		} else {
+			state.flags &= ~PlanetNet::FLAG_NO_CLIMB;
+		}
+	}
+	bool get_no_climb() const { return (state.flags & PlanetNet::FLAG_NO_CLIMB) != 0; }
 	void set_dead(bool p_dead) {
 		state.action = p_dead ? PlanetNet::ACTION_DEATH : PlanetNet::ACTION_NONE;
 		state.action_ticks = 0;

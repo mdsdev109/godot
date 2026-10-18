@@ -66,7 +66,8 @@ enum WalkerAction : uint8_t {
 	ACTION_EMBER = 16, // an aimed burst on the ground: mobile, fragile
 	ACTION_GUST = 17, // a cone that blows back what is in front: mobile, fragile
 	ACTION_SLAM = 18, // the blade driven into the ground, crushing what is round: committed, armoured
-	ACTION_COUNT = 19,
+	ACTION_THROW_ROCK = 19, // a rock thrown at where a target is: what an NPC has for one it cannot reach
+	ACTION_COUNT = 20,
 };
 
 // What a blow did to what it reached (Walker::strike; MSG_HIT).
@@ -423,6 +424,31 @@ struct MoveTable {
 		slam.guard_cost = 260;
 		slam.guard_push = 4.0;
 		slam.cancel(INTO_DODGE, 28);
+
+		// Thrown Rock: lobbed at where its target is -- on a wall, on a ledge out of reach -- landing 1.2 m
+		// round that point half a second later. What a bandit has for a target it cannot reach (Breath of
+		// the Wild's answer to a climber); a blow that breaks a climber's poise knocks it off the wall
+		// (Walker::recoil), and its poise damage always does. Planted; no focus, a short cooldown.
+		Move &rock = t.moves[ACTION_THROW_ROCK];
+		rock.name = "thrown_rock";
+		rock.kind = KIND_ABILITY;
+		rock.ticks = 30;
+		rock.cooldown = 75;
+		rock.track_to = 16;
+		rock.track_rate = 20.0;
+		rock.shape = SHAPE_AREA;
+		rock.hit_from = 16;
+		rock.hit_to = 18;
+		rock.radius = 1.2;
+		rock.range = 22.0;
+		rock.height = 3.0;
+		rock.damage = 8;
+		rock.poise_damage = 70;
+		rock.reaction = REACT_FLINCH;
+		rock.push = 2.0;
+		rock.guard_cost = 60;
+		rock.guard_push = 1.5;
+		rock.cancel(INTO_DODGE, 18);
 
 		t.hash = t.compute_hash();
 		return t;

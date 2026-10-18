@@ -326,7 +326,7 @@ public:
 		return e != nullptr ? int(e->team) : 0;
 	}
 	// A walker's state for scripts: {position, velocity, rotation, up, reference, mode, action,
-	// action_ticks, stamina, poise, focus, loadout, cooldowns, aim, health, health_max, dead}.
+	// action_ticks, stamina, poise, focus, loadout, cooldowns, aim, health, health_max, dead, no_climb}.
 	Dictionary get_entity_walker(int64_t p_id) const;
 	void destroy_entity(int64_t p_id);
 	bool has_entity(int64_t p_id) const { return entities.has(uint64_t(p_id)); }

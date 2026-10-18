@@ -64,6 +64,9 @@ enum WalkerFlag : uint8_t {
 	FLAG_NO_GRAB = 1,
 	// Out of stamina: no sprint, no glider, no holding a wall, until it has refilled completely.
 	FLAG_EXHAUSTED = 2,
+	// Never climbs: walls stop it, as an unclimbable face stops anyone (an NPC: docs/COMBAT.md, "The
+	// bandit"). Kept, unlike the others: whoever makes the walker sets it.
+	FLAG_NO_CLIMB = 4,
 };
 
 enum WalkerButton : uint8_t {
@@ -667,7 +670,7 @@ struct Walker {
 		out.velocity = Vector3();
 		out.mode = MODE_GROUND;
 		out.normal = Vector3();
-		out.flags = 0;
+		out.flags = p_state.flags & FLAG_NO_CLIMB; // what the walker is, not what it was doing
 		out.dash = 0;
 		out.reference = transport(p_state.reference, up_at(on));
 		return out;
@@ -753,11 +756,23 @@ struct Walker {
 	}
 
 	// A hit landing: knocked back along `p_push` (m/s, flattened onto the ground) into a reaction move
-	// (ACTION_STAGGER, ACTION_BLOCKED on the guard, ...). In the air only the push.
+	// (ACTION_STAGGER, ACTION_BLOCKED on the guard, ...). On a wall, knocked off it -- as a rock knocks a
+	// climber off in Breath of the Wild -- falling, not grabbing a face again until on its feet. In the air
+	// only the push.
 	WalkerState recoil(const WalkerState &p_state, const Vector3 &p_push, uint8_t p_reaction) const {
 		WalkerState out = p_state;
 		const Vector3 up = up_at(p_state.position);
 		const Vector3 push = p_push - up * p_push.dot(up);
+		if (p_state.mode == MODE_CLIMB) {
+			out.mode = MODE_AIR;
+			out.flags |= FLAG_NO_GRAB;
+			out.position = p_state.position + p_state.normal * 0.05;
+			out.velocity = push + p_state.normal * 2.0;
+			out.action = ACTION_NONE;
+			out.action_ticks = 0;
+			out.dash = 0;
+			return out;
+		}
 		if (p_state.mode != MODE_GROUND) {
 			out.velocity += push;
 			return out;
@@ -1290,7 +1305,7 @@ private:
 			const Vector3 from = p_feet + p_up * heights[k];
 			Vector3 grip;
 			if (cast(from, from + p_ahead * (body_radius + 0.5), grip)) {
-				if (!climbable(grip)) {
+				if (!climbable(grip) || (r_out.flags & FLAG_NO_CLIMB)) {
 					return false;
 				}
 				r_out.mode = MODE_CLIMB;
@@ -1383,7 +1398,7 @@ private:
 		}
 		if (slope > walk_slope) {
 			// A slope too steep to walk up.
-			if (!_grab(r_out, here, p_up, ahead) && climbable(next)) {
+			if (!_grab(r_out, here, p_up, ahead) && climbable(next) && !(r_out.flags & FLAG_NO_CLIMB)) {
 				r_out.mode = MODE_CLIMB;
 				r_out.position = next;
 				r_out.normal = surface_normal(next, -ahead);
@@ -1456,7 +1471,7 @@ private:
 			r_out.velocity = vh;
 			r_out.normal = Vector3();
 			r_out.flags &= ~FLAG_NO_GRAB;
-		} else if (!(p_in.flags & (FLAG_NO_GRAB | FLAG_EXHAUSTED)) && climbable(land)) {
+		} else if (!(p_in.flags & (FLAG_NO_GRAB | FLAG_EXHAUSTED | FLAG_NO_CLIMB)) && climbable(land)) {
 			r_out.mode = MODE_CLIMB;
 			r_out.position = land;
 			r_out.velocity = Vector3();

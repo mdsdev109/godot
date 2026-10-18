@@ -144,7 +144,9 @@ int64_t PlanetNetServer::create_npc(int p_type, const Vector3 &p_position) {
 	e->npc = true;
 	e->persistent = false;
 	e->team = TEAM_ENEMIES;
-	store_walker_state(*e, walker.place(walker_state(*e), p_position));
+	WalkerState s = walker.place(walker_state(*e), p_position);
+	s.flags |= FLAG_NO_CLIMB; // an NPC does not climb (docs/COMBAT.md, "The bandit")
+	store_walker_state(*e, s);
 	return id;
 }
 
@@ -177,6 +179,7 @@ Dictionary PlanetNetServer::get_entity_walker(int64_t p_id) const {
 	d["health"] = int(e->health);
 	d["health_max"] = int(e->health_max);
 	d["dead"] = s.action == ACTION_DEATH;
+	d["no_climb"] = (s.flags & FLAG_NO_CLIMB) != 0;
 	return d;
 }
 
