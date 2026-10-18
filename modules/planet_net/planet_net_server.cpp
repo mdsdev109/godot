@@ -143,6 +143,7 @@ int64_t PlanetNetServer::create_npc(int p_type, const Vector3 &p_position) {
 	ERR_FAIL_NULL_V(e, 0);
 	e->npc = true;
 	e->persistent = false;
+	e->team = TEAM_ENEMIES;
 	store_walker_state(*e, walker.place(walker_state(*e), p_position));
 	return id;
 }
@@ -350,8 +351,9 @@ void PlanetNetServer::_resolve_swings() {
 			if (T.key == attacker || t.health_max <= 0) {
 				continue;
 			}
-			// Players strike each other only with player_hits; enemies strike players, not each other.
-			if ((t.state.type == ENTITY_TYPE_PLAYER && !a->npc && !player_hits) || (a->npc && t.npc)) {
+			// Players strike each other only with player_hits; otherwise blows land only across sides.
+			const bool both_players = t.state.type == ENTITY_TYPE_PLAYER && a->state.type == ENTITY_TYPE_PLAYER;
+			if (both_players ? !player_hits : (a->team != 0 && a->team == t.team)) {
 				continue;
 			}
 			if (a->swing_hits.has(T.key)) {
@@ -596,6 +598,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			player.persistent = false;
 			player.health_max = player_health;
 			player.health = player_health;
+			player.team = TEAM_PLAYERS;
 			client->entity = uint64_t(id);
 			client->player_key = key;
 			client->welcomed = true;
@@ -1566,6 +1569,10 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_npc", "type", "position"), &PlanetNetServer::create_npc);
 	ClassDB::bind_method(D_METHOD("set_entity_input", "id", "move", "yaw", "buttons", "abilities", "aim"), &PlanetNetServer::set_entity_input, DEFVAL(0), DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("get_entity_walker", "id"), &PlanetNetServer::get_entity_walker);
+	ClassDB::bind_method(D_METHOD("set_entity_team", "id", "team"), &PlanetNetServer::set_entity_team);
+	ClassDB::bind_method(D_METHOD("get_entity_team", "id"), &PlanetNetServer::get_entity_team);
+	BIND_CONSTANT(TEAM_PLAYERS);
+	BIND_CONSTANT(TEAM_ENEMIES);
 	ClassDB::bind_method(D_METHOD("set_max_rewind_ticks", "ticks"), &PlanetNetServer::set_max_rewind_ticks);
 	ClassDB::bind_method(D_METHOD("get_max_rewind_ticks"), &PlanetNetServer::get_max_rewind_ticks);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_rewind_ticks"), "set_max_rewind_ticks", "get_max_rewind_ticks");

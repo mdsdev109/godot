@@ -160,6 +160,9 @@ private:
 		// Not a player but a walker all the same, stepped from `npc_input` (set_entity_input): an enemy.
 		bool npc = false;
 		PlanetNet::WalkerInput npc_input;
+		// Its side: blows land only across sides (players are TEAM_PLAYERS, enemies TEAM_ENEMIES unless set
+		// otherwise; 0, as the dummy, is on none and struck by all). Player against player is player_hits'.
+		uint8_t team = 0;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -311,6 +314,17 @@ public:
 	// and `entity_died` says so; what follows is the script's.
 	int64_t create_npc(int p_type, const Vector3 &p_position);
 	void set_entity_input(int64_t p_id, const Vector2 &p_move, float p_yaw, int p_buttons, int p_abilities, const Vector3 &p_aim);
+	static constexpr int TEAM_PLAYERS = 1;
+	static constexpr int TEAM_ENEMIES = 2;
+	void set_entity_team(int64_t p_id, int p_team) {
+		Entity *e = entities.getptr(uint64_t(p_id));
+		ERR_FAIL_NULL(e);
+		e->team = uint8_t(CLAMP(p_team, 0, 255));
+	}
+	int get_entity_team(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->team) : 0;
+	}
 	// A walker's state for scripts: {position, velocity, rotation, up, reference, mode, action,
 	// action_ticks, stamina, poise, focus, loadout, cooldowns, aim, health, health_max, dead}.
 	Dictionary get_entity_walker(int64_t p_id) const;
