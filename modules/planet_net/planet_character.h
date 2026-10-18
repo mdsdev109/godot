@@ -126,6 +126,10 @@ public:
 		}
 		return Variant();
 	}
+	// Line of sight, by the walker's rule (Walker::sees): whether nothing stands between two points but
+	// within `slack` of the second; and whether this walker could cast an aimed ability at a point.
+	bool in_sight(const Vector3 &p_from, const Vector3 &p_to, double p_slack) const { return walker.sees(p_from, p_to, p_slack); }
+	bool can_cast_at(const Vector3 &p_point) const { return walker.can_cast_from(state.position, p_point); }
 	// Whether a point is inside the solid the walker moves on.
 	bool is_inside(const Vector3 &p_point) const { return walker.inside(p_point); }
 

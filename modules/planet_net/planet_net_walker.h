@@ -309,6 +309,18 @@ struct Walker {
 	uint16_t focus_regen = 4;
 	// An aimed ability with no aim lands this far ahead (or at its range, if shorter).
 	double aim_ahead = 6.0;
+	// Line of sight (sees()). An aimed ability is cast only where the caster sees the area it makes: from
+	// its eye, eye_height over its feet, to cast_lift over the point -- not the ground itself, so a ledge's
+	// top seen from below can be thrown onto, and a wall's far side cannot. A blow lands only on a body
+	// whose middle, body_middle over its feet, is in sight of where the blow comes from -- an area's point,
+	// aim_lift up, or the attacker's own middle.
+	double eye_height = 1.5;
+	double cast_lift = 1.0;
+	double aim_lift = 0.3;
+	double body_middle = 0.9;
+	// How near its end a sight line may meet something and still see: the line to a point just over the
+	// ground skims it, and a bump just short of the point is no wall.
+	double sight_slack = 0.75;
 
 	// Down.
 	Vector3 gravity_centre;
@@ -536,6 +548,22 @@ struct Walker {
 		return ha || hb;
 	}
 
+	// Whether nothing stands between two points -- the analytic ground, a collider -- but within `p_slack`
+	// of the second: a body's own collider, the ground just under a point lifted off it.
+	bool sees(const Vector3 &p_from, const Vector3 &p_to, double p_slack = 0.0) const {
+		Vector3 hit;
+		if (!cast(p_from, p_to, hit)) {
+			return true;
+		}
+		return hit.distance_to(p_to) <= p_slack;
+	}
+
+	// Whether a caster standing at `p_feet` sees `p_point` to cast an aimed ability at: from its eye to just
+	// over the point.
+	bool can_cast_from(const Vector3 &p_feet, const Vector3 &p_point) const {
+		return sees(p_feet + up_at(p_feet) * eye_height, p_point + up_at(p_point) * cast_lift, sight_slack);
+	}
+
 	// Whether the ground at a point can be climbed. Materials and objects that cannot will answer here.
 	bool climbable(const Vector3 &p_point) const {
 		(void)p_point;
@@ -713,8 +741,9 @@ struct Walker {
 
 	// Whether the move in `p_state` reaches a body standing at `p_feet` with radius `p_radius`, by its hit's
 	// shape: within reach in the arc in front, within its radius all round, or within its radius of the
-	// aim point -- and the body's feet within its height. Judged by the server (and offline the game),
-	// never predicted.
+	// aim point -- and the body's feet within its height, and its middle in sight of where the blow comes
+	// from (a rock landing on the far side of a wall does not hit a body on this side, nor a sword through
+	// it). Judged by the server (and offline the game), never predicted.
 	bool swing_reaches(const WalkerState &p_state, const Vector3 &p_feet, double p_radius) const {
 		const Move &m = move_of(p_state);
 		if (!m.hits()) {
@@ -729,16 +758,35 @@ struct Walker {
 		}
 		const Vector3 dh = d - up * dv;
 		const double dist = dh.length();
+		bool within = false;
 		if (m.shape == SHAPE_AROUND || m.shape == SHAPE_AREA) {
-			return dist <= m.radius + p_radius;
+			within = dist <= m.radius + p_radius;
+		} else if (dist <= m.reach + p_radius) {
+			within = dist <= p_radius + body_radius // touching
+					|| _facing(p_state, up).dot(dh / dist) >= Math::cos(Math::deg_to_rad(m.arc));
 		}
-		if (dist > m.reach + p_radius) {
+		if (!within) {
 			return false;
 		}
-		if (dist <= p_radius + body_radius) {
-			return true; // touching
+		const Vector3 from = m.shape == SHAPE_AREA ? p_state.aim + up * aim_lift : p_state.position + up * body_middle;
+		return sees(from, p_feet + up_at(p_feet) * body_middle, p_radius + 0.3);
+	}
+
+	// Where an aimed move lands, as an offset from the caster: `p_aim` kept within the move's range (its
+	// flat part, `r_flat`); with none, straight along `p_face`.
+	Vector3 _landing(const Move &p_move, const Vector3 &p_aim, const Vector3 &p_up, const Vector3 &p_face, Vector3 &r_flat) const {
+		Vector3 off = p_aim;
+		const double rise = off.dot(p_up);
+		r_flat = off - p_up * rise;
+		const double far = r_flat.length();
+		if (far < 0.01) {
+			r_flat = p_face * MIN(aim_ahead, p_move.range);
+			off = r_flat;
+		} else if (far > p_move.range) {
+			off = r_flat * (p_move.range / far) + p_up * rise;
+			r_flat = r_flat * (p_move.range / far);
 		}
-		return _facing(p_state, up).dot(dh / dist) >= Math::cos(Math::deg_to_rad(m.arc));
+		return off;
 	}
 
 	// Whether a guard held in `p_state` faces a blow from `p_from`.
@@ -944,16 +992,17 @@ struct Walker {
 				const bool locked = (p_input.buttons & BUTTON_LOCK) && !sprinting;
 				const Move &now = move_of(p_state);
 				const Ground g{ up, forward, wish, vh, locked, moving, p_input.aim };
-				const bool can_start = !now.committed() && intent != INTENT_NONE && _affords(out, intent, _intent_move(p_state, intent), 0);
+				const bool can_start = !now.committed() && intent != INTENT_NONE && _affords(out, intent, _intent_move(p_state, intent), 0)
+						&& _castable(p_state, _intent_move(p_state, intent), g);
 				if (!now.committed() && intent != INTENT_NONE && !can_start) {
-					// Free to move but unable to pay: the press is dropped, not kept until stamina comes back --
-					// the buffer is for presses a move is holding up.
+					// Free to move but unable to pay, or to see where it would cast: the press is dropped, not
+					// kept until stamina comes back -- the buffer is for presses a move is holding up.
 					used_intent = true;
 				}
 				if (now.committed()) {
 					// In a move: what a press may start part way through it (a cancel window), or on with it.
 					const uint8_t next = _cancel_into(now, p_state, intent);
-					if (next != ACTION_NONE && _affords(out, intent, next, _cancel_extra(now, p_state, intent))) {
+					if (next != ACTION_NONE && _affords(out, intent, next, _cancel_extra(now, p_state, intent)) && _castable(p_state, next, g)) {
 						spent = _start_move(out, p_state, next, intent, _cancel_extra(now, p_state, intent), g, p_dt);
 						used_intent = true;
 					} else {
@@ -1025,6 +1074,26 @@ private:
 		bool moving;
 		Vector3 aim; // an aimed ability's: offset from the position (WalkerInput::aim)
 	};
+
+	// Whether an aimed move (SHAPE_AREA) starting now could be cast: where it would land in sight of the
+	// caster's eye. Any other move, always.
+	bool _castable(const WalkerState &p_in, uint8_t p_id, const Ground &p_g) const {
+		const Move &m = moves().get(p_id);
+		if (m.shape != SHAPE_AREA) {
+			return true;
+		}
+		Vector3 flat;
+		return can_cast_from(p_in.position, p_in.position + _landing(m, p_g.aim, p_g.up, _start_face(p_in, m, p_g), flat));
+	}
+
+	// The way a move starting now faces, before an aim turns it: a roll the stick's way, else the target
+	// locked on, else the stick, else as it faced.
+	Vector3 _start_face(const WalkerState &p_in, const Move &p_move, const Ground &p_g) const {
+		if (p_move.root == ROOT_ROLL) {
+			return p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up);
+		}
+		return p_g.locked ? p_g.forward : (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up));
+	}
 
 	// What this tick's presses ask for, the strongest first: a dodge, an ability (the lowest slot), a
 	// light, a heavy.
@@ -1133,22 +1202,11 @@ private:
 		if (p_intent >= INTENT_ABILITY && p_intent < INTENT_ABILITY + ABILITY_SLOTS) {
 			r_out.cooldown[p_intent - INTENT_ABILITY] = m.cooldown;
 		}
-		Vector3 face = m.root == ROOT_ROLL ? (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up))
-										   : (p_g.locked ? p_g.forward : (p_g.moving ? p_g.wish.normalized() : _facing(p_in, p_g.up)));
+		Vector3 face = _start_face(p_in, m, p_g);
 		if (m.shape == SHAPE_AREA) {
 			// Where it lands: the aim, flattened and kept within range; with none, straight ahead.
-			Vector3 off = p_g.aim;
-			const double rise = off.dot(p_g.up);
-			Vector3 flat = off - p_g.up * rise;
-			const double far = flat.length();
-			if (far < 0.01) {
-				flat = face * MIN(aim_ahead, m.range);
-				off = flat;
-			} else if (far > m.range) {
-				off = flat * (m.range / far) + p_g.up * rise;
-				flat = flat * (m.range / far);
-			}
-			r_out.aim = p_in.position + off;
+			Vector3 flat;
+			r_out.aim = p_in.position + _landing(m, p_g.aim, p_g.up, face, flat);
 			if (flat.length_squared() > 1e-6) {
 				face = flat.normalized();
 			}

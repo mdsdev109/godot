@@ -708,6 +708,8 @@ void PlanetNavigator::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("smooth_path", "path"), &PlanetNavigator::smooth_path);
 	ClassDB::bind_method(D_METHOD("is_straight_walkable", "from", "to"), &PlanetNavigator::is_straight_walkable);
 	ClassDB::bind_method(D_METHOD("ground_point", "point"), &PlanetNavigator::ground_point);
+	ClassDB::bind_method(D_METHOD("in_sight", "from", "to", "slack"), &PlanetNavigator::in_sight, DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("can_cast_from", "feet", "point"), &PlanetNavigator::can_cast_from);
 	ClassDB::bind_method(D_METHOD("is_walkable_at", "point"), &PlanetNavigator::is_walkable_at);
 	ClassDB::bind_method(D_METHOD("get_last_expansions"), &PlanetNavigator::get_last_expansions);
 	ClassDB::bind_method(D_METHOD("get_cached_tiles"), &PlanetNavigator::get_cached_tiles);

@@ -153,6 +153,8 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_body", "feet", "radius"), &PlanetCharacter::add_body);
 	ClassDB::bind_method(D_METHOD("clear_bodies"), &PlanetCharacter::clear_bodies);
 	ClassDB::bind_method(D_METHOD("swing_reaches", "feet", "radius"), &PlanetCharacter::swing_reaches);
+	ClassDB::bind_method(D_METHOD("in_sight", "from", "to", "slack"), &PlanetCharacter::in_sight, DEFVAL(0.0));
+	ClassDB::bind_method(D_METHOD("can_cast_at", "point"), &PlanetCharacter::can_cast_at);
 	ClassDB::bind_method(D_METHOD("guards", "from"), &PlanetCharacter::guards);
 	ClassDB::bind_method(D_METHOD("recoil", "push", "blocked"), &PlanetCharacter::recoil);
 	ClassDB::bind_method(D_METHOD("react", "push", "move"), &PlanetCharacter::react);

@@ -209,6 +209,10 @@ public:
 	bool is_straight_walkable(const Vector3 &p_from, const Vector3 &p_to) { return _straight(p_from, p_to); }
 	// The floor point of the cell containing a point nearest it, and whether that cell can be stood on.
 	Vector3 ground_point(const Vector3 &p_point);
+	// Line of sight over the same ground, by the walker's rule (Walker::sees, can_cast_from): for an NPC
+	// choosing where it can throw from.
+	bool in_sight(const Vector3 &p_from, const Vector3 &p_to, double p_slack) const { return ground.sees(p_from, p_to, p_slack); }
+	bool can_cast_from(const Vector3 &p_feet, const Vector3 &p_point) const { return ground.can_cast_from(p_feet, p_point); }
 	bool is_walkable_at(const Vector3 &p_point);
 	int get_last_expansions() const { return last_expansions; }
 	int get_cached_tiles() const { return int(tiles.size()); }
