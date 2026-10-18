@@ -764,10 +764,15 @@ struct Walker {
 		const Vector3 up = up_at(p_state.position);
 		const Vector3 push = p_push - up * p_push.dot(up);
 		if (p_state.mode == MODE_CLIMB) {
+			// Off the face and away from it: of the push only what goes away from the wall or along it.
+			// Its part into the wall (a blow from below, its attacker in front of the face) cancelled the
+			// way out and once put the climber through the wall.
+			const Vector3 n = p_state.normal;
+			const Vector3 along = p_push - n * p_push.dot(n);
 			out.mode = MODE_AIR;
 			out.flags |= FLAG_NO_GRAB;
-			out.position = p_state.position + p_state.normal * 0.05;
-			out.velocity = push + p_state.normal * 2.0;
+			out.position = p_state.position + n * 0.1;
+			out.velocity = along + n * MAX(2.5, p_push.dot(n));
 			out.action = ACTION_NONE;
 			out.action_ticks = 0;
 			out.dash = 0;
@@ -835,7 +840,8 @@ struct Walker {
 	uint8_t strike(const WalkerState &p_attacker, WalkerState &r_target, uint8_t &r_reaction, int &r_damage, double p_guard_break_push = 4.0) const {
 		const Move &m = move_of(p_attacker);
 		const Vector3 up = up_at(r_target.position);
-		Vector3 away = r_target.position - p_attacker.position;
+		// Pushed away from where the blow came from: the attacker, or where an area landed.
+		Vector3 away = r_target.position - (m.shape == SHAPE_AREA ? p_attacker.aim : p_attacker.position);
 		away -= up * away.dot(up);
 		away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
 		r_reaction = ACTION_NONE;

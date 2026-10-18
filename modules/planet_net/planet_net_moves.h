@@ -426,19 +426,20 @@ struct MoveTable {
 		slam.cancel(INTO_DODGE, 28);
 
 		// Thrown Rock: lobbed at where its target is -- on a wall, on a ledge out of reach -- landing 1.2 m
-		// round that point half a second later. What a bandit has for a target it cannot reach (Breath of
-		// the Wild's answer to a climber); a blow that breaks a climber's poise knocks it off the wall
-		// (Walker::recoil), and its poise damage always does. Planted; no focus, a short cooldown.
+		// round that point two thirds of a second later -- let go at tick 10, a third of a second in the air,
+		// so it can be seen coming. What a bandit has for a target it cannot reach (Breath of the Wild's
+		// answer to a climber); a blow that breaks a climber's poise knocks it off the wall (Walker::recoil),
+		// and its poise damage always does. Planted; no focus, a short cooldown.
 		Move &rock = t.moves[ACTION_THROW_ROCK];
 		rock.name = "thrown_rock";
 		rock.kind = KIND_ABILITY;
 		rock.ticks = 30;
 		rock.cooldown = 75;
-		rock.track_to = 16;
+		rock.track_to = 10; // turning toward it till the rock leaves the hand
 		rock.track_rate = 20.0;
 		rock.shape = SHAPE_AREA;
-		rock.hit_from = 16;
-		rock.hit_to = 18;
+		rock.hit_from = 20;
+		rock.hit_to = 22;
 		rock.radius = 1.2;
 		rock.range = 22.0;
 		rock.height = 3.0;

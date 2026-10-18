@@ -213,6 +213,24 @@ double PlanetNavigator::_height_on(const Column &p_column, const Vector3 &p_poin
 	return (p_point - p_column.base).dot(p_column.up);
 }
 
+RID PlanetNavigator::_body() {
+	if (!body_shape.is_valid() && agent_radius > 0.0 && PhysicsServer3D::get_singleton() != nullptr) {
+		body_shape = PhysicsServer3D::get_singleton()->capsule_shape_create();
+		Dictionary d;
+		d["radius"] = agent_radius;
+		d["height"] = MAX(agent_height - KNEE_M, agent_radius * 2.0 + 0.01);
+		PhysicsServer3D::get_singleton()->shape_set_data(body_shape, d);
+	}
+	return body_shape;
+}
+
+// The body's capsule standing on a floor at `p_at`, upright along `p_up`: from knee height to the head.
+static Transform3D body_transform(const Vector3 &p_at, const Vector3 &p_up, double p_knee, double p_height) {
+	const Vector3 x = PlanetNet::Walker::local_north(p_up);
+	const Basis basis(x, p_up, x.cross(p_up));
+	return Transform3D(basis.orthonormalized(), p_at + p_up * (p_knee + 0.5 * (p_height - p_knee)));
+}
+
 bool PlanetNavigator::_standable(const Column &p_column, double p_h) const {
 	if (!ground.space.is_valid() || PhysicsServer3D::get_singleton() == nullptr) {
 		return true;
@@ -233,7 +251,25 @@ bool PlanetNavigator::_standable(const Column &p_column, double p_h) const {
 	params.exclude = ground.exclude;
 	params.collision_mask = ground.collision_mask;
 	PhysicsServer3DTypes::ShapeResult result;
-	return state->intersect_point(params, &result, 1) == 0;
+	if (state->intersect_point(params, &result, 1) != 0) {
+		return false;
+	}
+	// Room round it: the body's capsule, knee to head, touching nothing.
+	if (agent_radius > 0.0) {
+		const RID shape = const_cast<PlanetNavigator *>(this)->_body();
+		if (shape.is_valid()) {
+			PhysicsServer3DTypes::ShapeParameters sp;
+			sp.shape_rid = shape;
+			sp.transform = body_transform(p_column.at(p_h), p_column.up, KNEE_M, agent_height);
+			sp.exclude = ground.exclude;
+			sp.collision_mask = ground.collision_mask;
+			PhysicsServer3DTypes::ShapeResult hit;
+			if (state->intersect_shape(sp, &hit, 1) != 0) {
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 int PlanetNavigator::_floors(const Column &p_column, double r_heights[MAX_FLOORS]) const {
@@ -540,6 +576,25 @@ bool PlanetNavigator::_straight(const Vector3 &p_a, const Vector3 &p_b) {
 	if (_blocked(p_a, p_b, up_a)) {
 		return false;
 	}
+	// The body swept along the line: with room round it, a leg that passes a wall's corner keeps clear.
+	if (agent_radius > 0.0 && ground.space.is_valid() && PhysicsServer3D::get_singleton() != nullptr) {
+		PhysicsDirectSpaceState3D *state = PhysicsServer3D::get_singleton()->space_get_direct_state(ground.space);
+		const RID shape = _body();
+		if (state != nullptr && shape.is_valid()) {
+			PhysicsServer3DTypes::ShapeParameters sp;
+			sp.shape_rid = shape;
+			const Vector3 lift = up_a * 0.05; // off the floor it stands on, which a step down would meet
+			sp.transform = body_transform(p_a + lift, up_a, KNEE_M, agent_height);
+			sp.motion = p_b - p_a;
+			sp.exclude = ground.exclude;
+			sp.collision_mask = ground.collision_mask;
+			real_t safe = 1.0;
+			real_t unsafe = 1.0;
+			if (state->cast_motion(sp, safe, unsafe) && safe < 1.0) {
+				return false;
+			}
+		}
+	}
 	// Along the line in steps of half a cell, following the ground from floor to floor: each step within
 	// the agent's slope of the last, and the end on the floor b is on.
 	const double max_slope = PlanetDetMath::tan(Math::deg_to_rad(max_slope_degrees));
@@ -613,6 +668,8 @@ void PlanetNavigator::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_agent_height"), &PlanetNavigator::get_agent_height);
 	ClassDB::bind_method(D_METHOD("set_step_height", "height"), &PlanetNavigator::set_step_height);
 	ClassDB::bind_method(D_METHOD("get_step_height"), &PlanetNavigator::get_step_height);
+	ClassDB::bind_method(D_METHOD("set_agent_radius", "radius"), &PlanetNavigator::set_agent_radius);
+	ClassDB::bind_method(D_METHOD("get_agent_radius"), &PlanetNavigator::get_agent_radius);
 	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetNavigator::set_uniform_down);
 	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetNavigator::get_uniform_down);
 	ClassDB::bind_method(D_METHOD("set_flat_origin", "origin"), &PlanetNavigator::set_flat_origin);
@@ -631,6 +688,7 @@ void PlanetNavigator::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_expansions"), "set_max_expansions", "get_max_expansions");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_height", PROPERTY_HINT_NONE, "suffix:m"), "set_agent_height", "get_agent_height");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "step_height", PROPERTY_HINT_NONE, "suffix:m"), "set_step_height", "get_step_height");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "agent_radius", PROPERTY_HINT_NONE, "suffix:m"), "set_agent_radius", "get_agent_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "uniform_down"), "set_uniform_down", "get_uniform_down");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "flat_origin"), "set_flat_origin", "get_flat_origin");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "flat_top", PROPERTY_HINT_NONE, "suffix:m"), "set_flat_top", "get_flat_top");

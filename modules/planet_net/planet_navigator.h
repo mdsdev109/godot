@@ -80,6 +80,12 @@ private:
 	double max_slope_degrees = 35.0;
 	double slope_weight = 2.0;
 	double agent_height = 1.8;
+	// The body's room round it, from knee height to its head: 0 a line (the knee ray only, as the deer
+	// have it); more and a floor needs a capsule of that radius clear over it, and a straight leg sweeps
+	// one -- what keeps a body off walls rather than brushing along them.
+	double agent_radius = 0.0;
+	RID body_shape; // that capsule, made when first wanted
+	RID _body();
 	double step_height = 0.5; // smooth_path: how far the ground may sit off a straight line's
 	int max_expansions = 40000;
 	int last_expansions = 0;
@@ -132,6 +138,15 @@ public:
 	double get_agent_height() const { return agent_height; }
 	void set_step_height(double p_height) { step_height = MAX(p_height, 0.0); }
 	double get_step_height() const { return step_height; }
+	void set_agent_radius(double p_radius) {
+		agent_radius = MAX(p_radius, 0.0);
+		if (body_shape.is_valid() && PhysicsServer3D::get_singleton() != nullptr) {
+			PhysicsServer3D::get_singleton()->free_rid(body_shape);
+		}
+		body_shape = RID();
+		_clear_tiles();
+	}
+	double get_agent_radius() const { return agent_radius; }
 
 	// A flat level rather than a planet: down along `p_down` (zero: a planet again), the grid's plane
 	// through `flat_origin`, searched from flat_top above it to flat_bottom below. The analytic ground is
@@ -199,5 +214,10 @@ public:
 	int get_cached_tiles() const { return int(tiles.size()); }
 
 	PlanetNavigator() { _configure(); }
-	~PlanetNavigator() { _clear_tiles(); }
+	~PlanetNavigator() {
+		_clear_tiles();
+		if (body_shape.is_valid() && PhysicsServer3D::get_singleton() != nullptr) {
+			PhysicsServer3D::get_singleton()->free_rid(body_shape);
+		}
+	}
 };
