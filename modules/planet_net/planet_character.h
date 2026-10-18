@@ -210,8 +210,8 @@ public:
 	}
 	int get_poise() const { return int(state.poise); }
 	// A blow by `p_attacker`'s move landing on this character, by the server's one rule (Walker::strike:
-	// dodged, guarded, the guard broken, or struck through poise). Returns {result (HitResult), reaction
-	// (the reaction move, 0 none), damage}; health is the caller's.
+	// dodged, guarded, the guard broken, struck through poise, or struck in the back). Returns {result
+	// (HitResult), reaction (the reaction move, 0 none), damage}; health is the caller's.
 	Dictionary receive(const Ref<PlanetCharacter> &p_attacker) {
 		Dictionary d;
 		ERR_FAIL_COND_V(p_attacker.is_null(), d);
@@ -233,6 +233,8 @@ public:
 		}
 	}
 	bool get_no_climb() const { return (state.flags & PlanetNet::FLAG_NO_CLIMB) != 0; }
+	// Crouched (sneaking): toggled by the crouch button (PlanetNet::BUTTON_CROUCH, 256) on the ground.
+	bool is_crouching() const { return (state.flags & PlanetNet::FLAG_CROUCH) != 0; }
 	void set_dead(bool p_dead) {
 		state.action = p_dead ? PlanetNet::ACTION_DEATH : PlanetNet::ACTION_NONE;
 		state.action_ticks = 0;

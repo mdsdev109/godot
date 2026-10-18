@@ -265,6 +265,7 @@ public:
 	Vector3 get_predicted_velocity() const { return predicted.velocity; }
 	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing, 3 gliding.
 	int get_predicted_mode() const { return int(predicted.mode); }
+	bool is_predicted_crouching() const { return (predicted.flags & PlanetNet::FLAG_CROUCH) != 0; }
 	// Stamina in the walker's units (0..stamina_max), and whether it is spent out and refilling.
 	int get_predicted_stamina() const { return int(predicted.stamina); }
 	bool is_predicted_exhausted() const { return (predicted.flags & PlanetNet::FLAG_EXHAUSTED) != 0; }

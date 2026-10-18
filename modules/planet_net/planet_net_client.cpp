@@ -102,7 +102,7 @@ void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw, int p_button
 	// Vector2 holds doubles, so an unrounded input predicts a different step on every tick it matters.
 	input.move = Vector2(float(p_move.x), float(p_move.y));
 	input.yaw = p_yaw;
-	input.buttons = uint8_t(p_buttons);
+	input.buttons = uint16_t(p_buttons);
 }
 
 void PlanetNetClient::set_ability_input(int p_abilities, const Vector3 &p_aim) {
@@ -419,7 +419,7 @@ void PlanetNetClient::_send_input() {
 		w.f32(frames[i].input.move.x);
 		w.f32(frames[i].input.move.y);
 		w.f32(frames[i].input.yaw);
-		w.u8(frames[i].input.buttons);
+		w.u16(frames[i].input.buttons);
 		w.u8(frames[i].input.abilities);
 		w.f32(float(frames[i].input.aim.x));
 		w.f32(float(frames[i].input.aim.y));
@@ -771,6 +771,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_look", "id"), &PlanetNetClient::get_entity_look);
 	ClassDB::bind_method(D_METHOD("get_predicted_velocity"), &PlanetNetClient::get_predicted_velocity);
 	ClassDB::bind_method(D_METHOD("get_predicted_mode"), &PlanetNetClient::get_predicted_mode);
+	ClassDB::bind_method(D_METHOD("is_predicted_crouching"), &PlanetNetClient::is_predicted_crouching);
 	ClassDB::bind_method(D_METHOD("get_predicted_stamina"), &PlanetNetClient::get_predicted_stamina);
 	ClassDB::bind_method(D_METHOD("is_predicted_exhausted"), &PlanetNetClient::is_predicted_exhausted);
 	ClassDB::bind_method(D_METHOD("get_predicted_action"), &PlanetNetClient::get_predicted_action);

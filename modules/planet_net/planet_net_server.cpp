@@ -155,7 +155,7 @@ void PlanetNetServer::set_entity_input(int64_t p_id, const Vector2 &p_move, floa
 	ERR_FAIL_NULL(e);
 	e->npc_input.move = Vector2(float(p_move.x), float(p_move.y));
 	e->npc_input.yaw = p_yaw;
-	e->npc_input.buttons = uint8_t(p_buttons);
+	e->npc_input.buttons = uint16_t(p_buttons);
 	e->npc_input.abilities = uint8_t(p_abilities & 63);
 	e->npc_input.aim = p_aim;
 }
@@ -180,6 +180,7 @@ Dictionary PlanetNetServer::get_entity_walker(int64_t p_id) const {
 	d["health_max"] = int(e->health_max);
 	d["dead"] = s.action == ACTION_DEATH;
 	d["no_climb"] = (s.flags & FLAG_NO_CLIMB) != 0;
+	d["crouch"] = (s.flags & FLAG_CROUCH) != 0;
 	return d;
 }
 
@@ -427,6 +428,7 @@ void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t 
 		WalkerState ts = walker_state(r_target);
 		result = walker.strike(walker_state(r_attacker), ts, reaction, damage, GUARD_BREAK_PUSH);
 		store_walker_state(r_target, ts);
+
 	} else {
 		// A target without a walker (the dummy) has no poise and no guard: every blow lands its reaction.
 		damage = m.damage;
@@ -693,7 +695,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				in.move.x = r.f32();
 				in.move.y = r.f32();
 				in.yaw = r.f32();
-				in.buttons = r.u8();
+				in.buttons = r.u16();
 				in.abilities = uint8_t(r.u8() & 63);
 				in.aim.x = r.f32();
 				in.aim.y = r.f32();
@@ -1573,6 +1575,8 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entity_input", "id", "move", "yaw", "buttons", "abilities", "aim"), &PlanetNetServer::set_entity_input, DEFVAL(0), DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("get_entity_walker", "id"), &PlanetNetServer::get_entity_walker);
 	ClassDB::bind_method(D_METHOD("set_entity_team", "id", "team"), &PlanetNetServer::set_entity_team);
+	ClassDB::bind_method(D_METHOD("set_entity_awareness", "id", "level"), &PlanetNetServer::set_entity_awareness);
+	ClassDB::bind_method(D_METHOD("get_entity_awareness", "id"), &PlanetNetServer::get_entity_awareness);
 	ClassDB::bind_method(D_METHOD("get_entity_team", "id"), &PlanetNetServer::get_entity_team);
 	BIND_CONSTANT(TEAM_PLAYERS);
 	BIND_CONSTANT(TEAM_ENEMIES);

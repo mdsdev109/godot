@@ -59,7 +59,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 16;
+constexpr uint16_t PROTOCOL_VERSION = 17;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -69,14 +69,14 @@ enum MessageType : uint8_t {
 	MSG_PING, // client -> server: f64 client clock (s)
 	MSG_PONG, // server -> client: f64 client clock echoed, f64 server time (ticks)
 	MSG_INPUT, // client -> server: u32 newest snapshot seq, u32 ack bits, u8 n,
-	//            n x (u32 tick the input is for, f32 move x, f32 move y, f32 yaw, u8 buttons,
+	//            n x (u32 tick the input is for, f32 move x, f32 move y, f32 yaw, u16 buttons,
 	//                 u8 ability slots held, f32 x3 aim offset,
 	//                 u32 the tick the client was drawing others at when it chose it: lag compensation)
 	MSG_WORLD_REQUEST, // client -> server, world channel: f64 x3 point, u16 n, n bytes
 	MSG_WORLD_CHANGE, // server -> client, world channel: u64 id, f64 x3 point, u16 n, n bytes
 	MSG_SNAPSHOT, // server -> client: u32 seq, u32 tick, u32 your last applied input tick (0: none),
 	//               [if nonzero: f64 x3 your position, f64 x3 velocity, f64 x3 walk reference,
-	//                u8 walk mode, u8 button latch, f64 x3 climb normal, u8 walk flags, u8 dash ticks,
+	//                u8 walk mode, u16 button latch, f64 x3 climb normal, u8 walk flags, u8 dash ticks,
 	//                ... the rest of the walker's state (write_walk), u8 teleports applied],
 	//               u16 n, n x record,
 	//               u16 m, m x u16 removed handle
@@ -108,7 +108,8 @@ struct EntityState {
 	Vector3 position;
 	Quaternion rotation;
 	Vector3 velocity;
-	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | move << 4); 0 for
+	// What the body is doing, for drawing it (PlanetNet::pose_of: walk mode | move << 4 | crouched << 12 |
+	// an NPC's awareness << 13); 0 for
 	// anything that is not a player.
 	uint16_t pose = 0;
 	// How a player is drawn: what it chose (the game packs its body, clothes and colours into it,

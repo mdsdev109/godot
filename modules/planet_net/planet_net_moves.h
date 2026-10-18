@@ -76,6 +76,7 @@ enum HitResult : uint8_t {
 	HIT_BLOCKED = 2, // on the guard: stamina, no damage
 	HIT_GUARD_BROKEN = 3, // on a guard without the stamina to hold it: staggered, no damage
 	HIT_DODGED = 4, // through a dodge's untouchable ticks (or a body down)
+	HIT_BACK = 5, // a weapon's blow in the back (Walker::from_behind): back_multiplier times its damage
 };
 
 enum MoveKind : uint8_t {

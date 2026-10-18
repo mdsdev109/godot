@@ -67,9 +67,12 @@ enum WalkerFlag : uint8_t {
 	// Never climbs: walls stop it, as an unclimbable face stops anyone (an NPC: docs/COMBAT.md, "The
 	// bandit"). Kept, unlike the others: whoever makes the walker sets it.
 	FLAG_NO_CLIMB = 4,
+	// Crouched (sneaking): slower and quieter, on the ground only. Toggled by BUTTON_CROUCH; a sprint, a
+	// jump, any move, or leaving the ground stands it up.
+	FLAG_CROUCH = 8,
 };
 
-enum WalkerButton : uint8_t {
+enum WalkerButton : uint16_t {
 	BUTTON_JUMP = 1,
 	BUTTON_SPRINT = 2,
 	BUTTON_DROP = 4, // let go of a wall
@@ -78,6 +81,7 @@ enum WalkerButton : uint8_t {
 	BUTTON_HEAVY = 32, // a heavy attack
 	BUTTON_BLOCK = 64, // held: guard
 	BUTTON_LOCK = 128, // held: face the way of `yaw` (a locked-on target) rather than the way it moves
+	BUTTON_CROUCH = 256, // pressed: crouch, or stand up (FLAG_CROUCH)
 };
 
 // What the walker is doing on top of its mode is a move: WalkerAction, in planet_net_moves.h.
@@ -85,7 +89,7 @@ enum WalkerButton : uint8_t {
 struct WalkerInput {
 	Vector2 move; // (right, forward), each in [-1, 1]
 	float yaw = 0.f; // heading in radians from the walker's reference direction
-	uint8_t buttons = 0; // WalkerButton bits held this tick
+	uint16_t buttons = 0; // WalkerButton bits held this tick
 	// The ability slots held (bit k: slot k, 0..5), and where an aimed ability goes: an offset from the
 	// walker's position (zero: straight ahead).
 	uint8_t abilities = 0;
@@ -102,7 +106,7 @@ struct WalkerState {
 	Vector3 reference;
 	uint8_t mode = MODE_GROUND;
 	// The buttons held last tick, so that holding jump jumps once.
-	uint8_t latch = 0;
+	uint16_t latch = 0;
 	// Climbing: the outward normal of the face held, followed as it bends.
 	Vector3 normal;
 	uint8_t flags = 0; // WalkerFlag bits
@@ -142,7 +146,7 @@ inline void write_walk(W &w, const WalkerState &s) {
 	w.f64(double(s.reference.y));
 	w.f64(double(s.reference.z));
 	w.u8(s.mode);
-	w.u8(s.latch);
+	w.u16(s.latch);
 	w.f64(double(s.normal.x));
 	w.f64(double(s.normal.y));
 	w.f64(double(s.normal.z));
@@ -173,7 +177,7 @@ inline void read_walk(R &r, WalkerState &s) {
 	s.reference.y = r.f64();
 	s.reference.z = r.f64();
 	s.mode = r.u8();
-	s.latch = r.u8();
+	s.latch = r.u16();
 	s.normal.x = r.f64();
 	s.normal.y = r.f64();
 	s.normal.z = r.f64();
@@ -226,11 +230,15 @@ inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 			std::memcmp(a.loadout, b.loadout, sizeof(a.loadout)) == 0 && std::memcmp(a.cooldown, b.cooldown, sizeof(a.cooldown)) == 0;
 }
 
-// What the body is doing, for drawing it on other machines: the mode in the low four bits, the move
-// above them. Replicated with every player (EntityState::pose).
+// What the body is doing, for drawing it on other machines: the mode in the low four bits, the move in
+// the eight above them, crouched in bit 12 (POSE_CROUCH); bits 13-14 an NPC's awareness, set by the server
+// (POSE_AWARE_SHIFT: 0 unaware, 1 suspicious, 2 alerted). Replicated with every entity (EntityState::pose).
+constexpr uint16_t POSE_CROUCH = 1u << 12;
+constexpr int POSE_AWARE_SHIFT = 13;
 inline uint16_t pose_of(const WalkerState &p_state) {
-	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4));
+	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4) | ((p_state.flags & FLAG_CROUCH) ? POSE_CROUCH : 0u));
 }
+inline uint8_t pose_action(uint16_t p_pose) { return uint8_t((p_pose >> 4) & 0xFFu); }
 
 // planet-demo docs/CHARACTER.md. Four modes: on the ground, in the air, climbing, gliding.
 //
@@ -252,6 +260,14 @@ struct Walker {
 	// at 0.7 -- unboosted.
 	double speed = 5.5;
 	double sprint_speed = 8.0;
+	// Crouched: a sneak, 2 m/s (the crouch walk's own pace, as BotW's sneak is about a walk's).
+	double crouch_speed = 2.0;
+	// A blow in the back: a weapon's blow from within back_arc degrees of straight behind its target lands
+	// back_multiplier times its damage and knocks it down, whatever its poise or armour -- positional, as
+	// Dark Souls' backstab is, not by whether the target noticed (which no one can judge of a player in
+	// PvP). A guard faces forward only, so it does not cover the back.
+	double back_multiplier = 3.0;
+	double back_arc = 50.0;
 	double climb_speed = 0.7;
 	double jump_speed = 7.0;
 	double gravity = 20.0;
@@ -939,9 +955,33 @@ struct Walker {
 			r_target = recoil(r_target, away * p_guard_break_push, ACTION_STAGGER);
 			return HIT_GUARD_BROKEN;
 		}
+		if (m.kind == KIND_ATTACK && from_behind(r_target, p_attacker.position)) {
+			// In the back: back_multiplier times the damage, and down, whatever its poise or armour.
+			Move back = m;
+			back.poise_damage = UINT16_MAX;
+			back.reaction = REACT_KNOCKDOWN;
+			r_damage = int(Math::round(double(m.damage) * back_multiplier));
+			r_target = take_hit(r_target, back, away, r_reaction);
+			return HIT_BACK;
+		}
 		r_damage = m.damage;
 		r_target = take_hit(r_target, m, away, r_reaction);
 		return HIT_STRUCK;
+	}
+
+	// Whether a blow from `p_from` comes at `p_state`'s back: within back_arc of straight behind it, across
+	// the ground. A body on a wall or in the air has no back to strike.
+	bool from_behind(const WalkerState &p_state, const Vector3 &p_from) const {
+		if (p_state.mode != MODE_GROUND) {
+			return false;
+		}
+		const Vector3 up = up_at(p_state.position);
+		Vector3 d = p_from - p_state.position;
+		d -= up * d.dot(up);
+		if (d.length_squared() < 1e-8) {
+			return false;
+		}
+		return -_facing(p_state, up).dot(d.normalized()) >= Math::cos(Math::deg_to_rad(back_arc));
 	}
 
 	WalkerState step(const WalkerState &p_state, const WalkerInput &p_input, double p_dt) const {
@@ -957,10 +997,19 @@ struct Walker {
 		if (wish.length_squared() > 1.0) {
 			wish = wish.normalized();
 		}
-		const uint8_t pressed = p_input.buttons & ~p_state.latch;
+		const uint16_t pressed = p_input.buttons & ~p_state.latch;
 		const bool moving = wish.length_squared() > 1e-12;
 		const bool sprinting = (p_input.buttons & BUTTON_SPRINT) && moving && !(p_state.flags & FLAG_EXHAUSTED);
-		const double run_speed = sprinting ? sprint_speed : speed;
+		// Crouched, toggled by its press; a sprint or a jump stands it up (and a move, or leaving the ground,
+		// below).
+		bool crouched = (p_state.flags & FLAG_CROUCH) != 0;
+		if (pressed & BUTTON_CROUCH) {
+			crouched = !crouched;
+		}
+		if (sprinting || (pressed & BUTTON_JUMP)) {
+			crouched = false;
+		}
+		const double run_speed = sprinting ? sprint_speed : (crouched ? crouch_speed : speed);
 
 		WalkerState out = p_state;
 		out.latch = p_input.buttons;
@@ -1087,9 +1136,15 @@ struct Walker {
 			out.action_ticks = 0;
 		}
 		_rest(out, spent);
+		if (crouched && out.mode == MODE_GROUND && out.action == ACTION_NONE) {
+			out.flags |= FLAG_CROUCH;
+		} else {
+			out.flags &= ~FLAG_CROUCH;
+		}
 		out.reference = transport(north, up_at(out.position));
 		return out;
 	}
+
 
 private:
 	// What a ground tick's input means for the move table.
@@ -1125,7 +1180,7 @@ private:
 
 	// What this tick's presses ask for, the strongest first: a dodge, an ability (the lowest slot), a
 	// light, a heavy.
-	static uint8_t _intent(uint8_t p_pressed, uint8_t p_abilities) {
+	static uint8_t _intent(uint16_t p_pressed, uint8_t p_abilities) {
 		if (p_pressed & BUTTON_DODGE) {
 			return INTENT_DODGE;
 		}
@@ -1633,7 +1688,7 @@ private:
 	}
 
 	// Returns whether stamina was spent.
-	bool _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_forward, const Vector3 &p_right, double p_mx, double p_my, uint8_t p_pressed, double p_dt) const {
+	bool _climb(WalkerState &r_out, const WalkerState &p_in, const Vector3 &p_forward, const Vector3 &p_right, double p_mx, double p_my, uint16_t p_pressed, double p_dt) const {
 		const Vector3 here = p_in.position;
 		const Vector3 up = up_at(here);
 		Vector3 n = p_in.normal;

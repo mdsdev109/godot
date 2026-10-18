@@ -37,7 +37,7 @@ void PlanetCharacter::step(const Vector2 &p_move, float p_yaw, int p_buttons, do
 	PlanetNet::WalkerInput in;
 	in.move = Vector2(float(p_move.x), float(p_move.y));
 	in.yaw = p_yaw;
-	in.buttons = uint8_t(p_buttons);
+	in.buttons = uint16_t(p_buttons);
 	in.abilities = ability_input;
 	in.aim = aim_input;
 	state = walker.step(state, in, p_dt);
@@ -167,6 +167,7 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_cooldowns"), &PlanetCharacter::clear_cooldowns);
 	ClassDB::bind_method(D_METHOD("get_poise"), &PlanetCharacter::get_poise);
 	ClassDB::bind_method(D_METHOD("receive", "attacker"), &PlanetCharacter::receive);
+	ClassDB::bind_method(D_METHOD("is_crouching"), &PlanetCharacter::is_crouching);
 	ClassDB::bind_method(D_METHOD("set_dead", "dead"), &PlanetCharacter::set_dead);
 	ClassDB::bind_method(D_METHOD("set_no_climb", "no"), &PlanetCharacter::set_no_climb);
 	ClassDB::bind_method(D_METHOD("get_no_climb"), &PlanetCharacter::get_no_climb);

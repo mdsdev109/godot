@@ -163,6 +163,10 @@ private:
 		// Its side: blows land only across sides (players are TEAM_PLAYERS, enemies TEAM_ENEMIES unless set
 		// otherwise; 0, as the dummy, is on none and struck by all). Player against player is player_hits'.
 		uint8_t team = 0;
+		// An NPC's awareness of the players, its brain's (set_entity_awareness): 0 unaware, 1 suspicious,
+		// 2 alerted. Drawn by every client (the pose's bits 13-14); presentation only -- a blow's damage is
+		// positional (Walker::from_behind), not by what the target noticed.
+		uint8_t awareness = 0;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
@@ -180,7 +184,7 @@ private:
 		r_entity.state.position = p_state.position;
 		r_entity.state.velocity = p_state.velocity;
 		r_entity.state.rotation = p_state.rotation;
-		r_entity.state.pose = PlanetNet::pose_of(p_state);
+		r_entity.state.pose = PlanetNet::pose_of(p_state) | uint16_t(r_entity.awareness << PlanetNet::POSE_AWARE_SHIFT);
 	}
 
 	PlanetNetLink link;
@@ -324,6 +328,18 @@ public:
 	int get_entity_team(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->team) : 0;
+	}
+	void set_entity_awareness(int64_t p_id, int p_level) {
+		Entity *e = entities.getptr(uint64_t(p_id));
+		ERR_FAIL_NULL(e);
+		e->awareness = uint8_t(CLAMP(p_level, 0, 3));
+		if (has_walker(*e)) {
+			e->state.pose = uint16_t((e->state.pose & ~(3u << PlanetNet::POSE_AWARE_SHIFT)) | (e->awareness << PlanetNet::POSE_AWARE_SHIFT));
+		}
+	}
+	int get_entity_awareness(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr ? int(e->awareness) : 0;
 	}
 	// A walker's state for scripts: {position, velocity, rotation, up, reference, mode, action,
 	// action_ticks, stamina, poise, focus, loadout, cooldowns, aim, health, health_max, dead, no_climb}.
