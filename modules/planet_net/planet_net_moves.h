@@ -64,7 +64,7 @@ enum WalkerAction : uint8_t {
 	// Abilities: not the weapon's (COMBAT_DESIGN.md section 4). Slotted in WalkerState::loadout.
 	ACTION_EMBER = 16, // an aimed burst on the ground: mobile, fragile
 	ACTION_GUST = 17, // a cone that blows back what is in front: mobile, fragile
-	ACTION_SLAM = 18, // a leap that crushes what is round where it lands: committed, armoured
+	ACTION_SLAM = 18, // the blade driven into the ground, crushing what is round: committed, armoured
 	ACTION_COUNT = 19,
 };
 
@@ -220,10 +220,11 @@ struct MoveTable {
 		dodge.invulnerable_from = 2;
 		dodge.invulnerable_to = 12;
 
-		// The lights: 22 ticks, live 9-13, a 1.5 m/s lunge ticks 3-13 (half a metre). Tracking the target
-		// (or the stick) through the windup, 20 degrees a tick, then committed to the way it faces. Late in
-		// one, the next of the combo or a heavy; once past its live ticks, a dodge out of it, dearer, or an
-		// ability.
+		// The lights: 22 ticks, live 9-13. No lunge of their own: a swing moves the body only as the stick
+		// does, at 0.3 of the walk speed, the legs walking under it (it had a 1.5 m/s lunge, and a body swung
+		// standing still slid half a metre on planted feet). Tracking the target (or the stick) through the
+		// windup, 20 degrees a tick, then committed to the way it faces. Late in one, the next of the combo
+		// or a heavy; once past its live ticks, a dodge out of it, dearer, or an ability.
 		const uint8_t lights[2] = { ACTION_LIGHT, ACTION_LIGHT_2 };
 		for (uint8_t id : lights) {
 			Move &m = t.moves[id];
@@ -231,13 +232,9 @@ struct MoveTable {
 			m.kind = KIND_ATTACK;
 			m.ticks = 22;
 			m.stamina = 60;
-			m.steer = 0.2;
+			m.steer = 0.3;
 			m.track_to = 9;
 			m.track_rate = 20.0;
-			m.root = ROOT_FACING;
-			m.root_from = 3;
-			m.root_to = 14;
-			m.root_speed = 1.5;
 			m.shape = SHAPE_ARC;
 			m.hit_from = 9;
 			m.hit_to = 14;
@@ -255,20 +252,15 @@ struct MoveTable {
 			m.next_light = id == ACTION_LIGHT ? ACTION_LIGHT_2 : ACTION_LIGHT;
 		}
 
-		// The heavy: 36 ticks, live 14-19, a 2 m/s lunge ticks 9-19; tracking slower and only through the
-		// windup; a dodge or an ability late in its recovery, a light at its very end.
+		// The heavy: 36 ticks, live 14-19, planted -- no lunge and no steering; tracking slower and only
+		// through the windup; a dodge or an ability late in its recovery, a light at its very end.
 		Move &heavy = t.moves[ACTION_HEAVY];
 		heavy.name = "heavy";
 		heavy.kind = KIND_ATTACK;
 		heavy.ticks = 36;
 		heavy.stamina = 150;
-		heavy.steer = 0.2;
 		heavy.track_to = 14;
 		heavy.track_rate = 12.0;
-		heavy.root = ROOT_FACING;
-		heavy.root_from = 9;
-		heavy.root_to = 20;
-		heavy.root_speed = 2.0;
 		heavy.shape = SHAPE_ARC;
 		heavy.hit_from = 14;
 		heavy.hit_to = 20;
@@ -386,11 +378,12 @@ struct MoveTable {
 		gust.cancel(INTO_DODGE, 8);
 		gust.cancel(INTO_LIGHT | INTO_HEAVY, 10);
 
-		// Leaping Slam: a leap of about 2.3 m that lands crushing everything within 2.4 m -- knocked down
-		// if its poise breaks. Committed: no steering, tracking only through the crouch, armoured from
-		// the leap through the landing. Stamina as well as focus.
+		// Ground Slam: the blade driven into the ground, crushing everything within 2.4 m -- knocked down if
+		// its poise breaks. Committed: no steering, tracking only through the windup, armoured through the
+		// blow. Stamina as well as focus. (It leapt 2.3 m first; drawn by a swing clip, the body slid along
+		// the ground on planted feet. The leap comes back with an animation that leaps.)
 		Move &slam = t.moves[ACTION_SLAM];
-		slam.name = "leaping_slam";
+		slam.name = "ground_slam";
 		slam.kind = KIND_ABILITY;
 		slam.ticks = 34;
 		slam.stamina = 120;
@@ -398,10 +391,6 @@ struct MoveTable {
 		slam.cooldown = 360;
 		slam.track_to = 8;
 		slam.track_rate = 15.0;
-		slam.root = ROOT_FACING;
-		slam.root_from = 8;
-		slam.root_to = 18;
-		slam.root_speed = 7.0;
 		slam.armour = 60;
 		slam.armour_from = 6;
 		slam.armour_to = 22;
