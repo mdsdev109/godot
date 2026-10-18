@@ -164,6 +164,9 @@ void PlanetCharacter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_loadout", "moves"), &PlanetCharacter::set_loadout);
 	ClassDB::bind_method(D_METHOD("clear_cooldowns"), &PlanetCharacter::clear_cooldowns);
 	ClassDB::bind_method(D_METHOD("get_poise"), &PlanetCharacter::get_poise);
+	ClassDB::bind_method(D_METHOD("receive", "attacker"), &PlanetCharacter::receive);
+	ClassDB::bind_method(D_METHOD("set_dead", "dead"), &PlanetCharacter::set_dead);
+	ClassDB::bind_method(D_METHOD("is_dead"), &PlanetCharacter::is_dead);
 	ClassDB::bind_method(D_METHOD("get_poise_max"), &PlanetCharacter::get_poise_max);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_info", "id"), &PlanetCharacter::get_move_info);
 	ClassDB::bind_static_method("PlanetCharacter", D_METHOD("get_move_count"), &PlanetCharacter::get_move_count);

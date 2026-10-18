@@ -205,6 +205,26 @@ public:
 		return int(reaction);
 	}
 	int get_poise() const { return int(state.poise); }
+	// A blow by `p_attacker`'s move landing on this character, by the server's one rule (Walker::strike:
+	// dodged, guarded, the guard broken, or struck through poise). Returns {result (HitResult), reaction
+	// (the reaction move, 0 none), damage}; health is the caller's.
+	Dictionary receive(const Ref<PlanetCharacter> &p_attacker) {
+		Dictionary d;
+		ERR_FAIL_COND_V(p_attacker.is_null(), d);
+		uint8_t reaction = PlanetNet::ACTION_NONE;
+		int damage = 0;
+		const uint8_t result = walker.strike(p_attacker->state, state, reaction, damage);
+		d["result"] = int(result);
+		d["reaction"] = int(reaction);
+		d["damage"] = damage;
+		return d;
+	}
+	// Down for good (ACTION_DEATH) or up again: the owner of the body decides when it dies.
+	void set_dead(bool p_dead) {
+		state.action = p_dead ? PlanetNet::ACTION_DEATH : PlanetNet::ACTION_NONE;
+		state.action_ticks = 0;
+	}
+	bool is_dead() const { return state.action == PlanetNet::ACTION_DEATH; }
 	int get_poise_max() const { return int(walker.poise_max); }
 
 	// The move table (planet_net_moves.h), for whoever draws or shows the moves: a move by id as a

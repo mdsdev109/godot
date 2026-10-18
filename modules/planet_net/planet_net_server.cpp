@@ -336,47 +336,27 @@ void PlanetNetServer::_send_cast(uint64_t p_caster, const Entity &p_entity, uint
 void PlanetNetServer::_strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at) {
 	const uint8_t attack = r_attacker.walk.action;
 	const Move &m = moves().get(attack);
-	const bool walks = r_target.state.type == ENTITY_TYPE_PLAYER;
-	const Vector3 up = walker.up_at(r_target.state.position);
-	Vector3 away = r_target.state.position - r_attacker.state.position;
-	away -= up * away.dot(up);
-	away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
+	const bool walks = has_walker(r_target);
 	uint8_t result = HIT_STRUCK;
 	uint8_t reaction = ACTION_NONE;
 	int damage = 0;
-	if (walks && walker.invulnerable(r_target.walk)) {
-		result = HIT_DODGED;
-	} else if (walks && walker.guards(r_target.walk, m.shape == SHAPE_AREA ? r_attacker.walk.aim : r_attacker.state.position)) {
-		const uint16_t cost = m.guard_cost;
+	if (walks) {
+		// The one rule for a blow on a walker (Walker::strike), offline play's too.
 		WalkerState ts = walker_state(r_target);
-		if (ts.stamina >= cost) {
-			ts.stamina = uint16_t(ts.stamina - cost);
-			ts.rest = walker.stamina_rest_ticks;
-			result = HIT_BLOCKED;
-			reaction = ACTION_BLOCKED;
-			store_walker_state(r_target, walker.recoil(ts, away * m.guard_push, ACTION_BLOCKED));
-		} else {
-			ts.stamina = 0;
-			ts.flags |= FLAG_EXHAUSTED;
-			result = HIT_GUARD_BROKEN;
-			reaction = ACTION_STAGGER;
-			store_walker_state(r_target, walker.recoil(ts, away * GUARD_BREAK_PUSH, ACTION_STAGGER));
-		}
+		result = walker.strike(walker_state(r_attacker), ts, reaction, damage, GUARD_BREAK_PUSH);
+		store_walker_state(r_target, ts);
 	} else {
+		// A target without a walker (the dummy) has no poise and no guard: every blow lands its reaction.
 		damage = m.damage;
+		reaction = Walker::reaction_move(m.reaction);
+		if (reaction != ACTION_NONE) {
+			r_target.react = moves().get(reaction).ticks;
+			r_target.state.pose = uint16_t(reaction << 4);
+		}
+	}
+	if (damage > 0) {
 		r_target.health = MAX(0, r_target.health - damage);
 		r_target.hurt_tick = tick;
-		if (walks) {
-			// Its poise takes the blow, or breaks into the blow's reaction (Walker::take_hit).
-			store_walker_state(r_target, walker.take_hit(walker_state(r_target), m, away, reaction));
-		} else {
-			// A target without a walker (the dummy) has no poise: every blow lands its reaction.
-			reaction = Walker::reaction_move(m.reaction);
-			if (reaction != ACTION_NONE) {
-				r_target.react = moves().get(reaction).ticks;
-				r_target.state.pose = uint16_t(reaction << 4);
-			}
-		}
 	}
 	++hits_resolved;
 	Writer w;

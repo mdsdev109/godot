@@ -695,6 +695,9 @@ struct Walker {
 
 	// Whether hits pass through this walker this tick: a move's untouchable window (the dodge's).
 	bool invulnerable(const WalkerState &p_state) const {
+		if (p_state.action == ACTION_DEATH) {
+			return true;
+		}
 		const Move &m = move_of(p_state);
 		return p_state.action_ticks >= m.invulnerable_from && p_state.action_ticks < m.invulnerable_to;
 	}
@@ -806,6 +809,42 @@ struct Walker {
 			out = recoil(out, p_away * p_attack.push, r_reaction);
 		}
 		return out;
+	}
+
+	// A blow by the move in `p_attacker` landing on `r_target` -- the one rule for it, the server's and
+	// offline play's alike: through a dodge's untouchable ticks nothing; on a guard facing it, its guard
+	// cost in stamina and a push back, or, without that much, the guard broken and the body staggered;
+	// otherwise its damage, and its poise damage through Walker::take_hit. `r_target` is changed to what
+	// the blow leaves; `r_reaction` is the reaction move it caused, `r_damage` the health it takes (the
+	// caller keeps health: it is not walker state). Returns a HitResult.
+	uint8_t strike(const WalkerState &p_attacker, WalkerState &r_target, uint8_t &r_reaction, int &r_damage, double p_guard_break_push = 4.0) const {
+		const Move &m = move_of(p_attacker);
+		const Vector3 up = up_at(r_target.position);
+		Vector3 away = r_target.position - p_attacker.position;
+		away -= up * away.dot(up);
+		away = away.length_squared() > 1e-12 ? away.normalized() : Vector3();
+		r_reaction = ACTION_NONE;
+		r_damage = 0;
+		if (invulnerable(r_target)) {
+			return HIT_DODGED;
+		}
+		if (guards(r_target, m.shape == SHAPE_AREA ? p_attacker.aim : p_attacker.position)) {
+			if (r_target.stamina >= m.guard_cost) {
+				r_target.stamina = uint16_t(r_target.stamina - m.guard_cost);
+				r_target.rest = stamina_rest_ticks;
+				r_reaction = ACTION_BLOCKED;
+				r_target = recoil(r_target, away * m.guard_push, ACTION_BLOCKED);
+				return HIT_BLOCKED;
+			}
+			r_target.stamina = 0;
+			r_target.flags |= FLAG_EXHAUSTED;
+			r_reaction = ACTION_STAGGER;
+			r_target = recoil(r_target, away * p_guard_break_push, ACTION_STAGGER);
+			return HIT_GUARD_BROKEN;
+		}
+		r_damage = m.damage;
+		r_target = take_hit(r_target, m, away, r_reaction);
+		return HIT_STRUCK;
 	}
 
 	WalkerState step(const WalkerState &p_state, const WalkerInput &p_input, double p_dt) const {
@@ -945,7 +984,7 @@ struct Walker {
 			out.buffer = INTENT_NONE;
 		}
 		// The ground's actions end off the ground; a climb jump is the wall's own (cleared above when it ends).
-		if (out.mode != MODE_GROUND && out.action != ACTION_NONE && !(out.mode == MODE_CLIMB && out.action == ACTION_CLIMB_JUMP)) {
+		if (out.mode != MODE_GROUND && out.action != ACTION_NONE && out.action != ACTION_DEATH && !(out.mode == MODE_CLIMB && out.action == ACTION_CLIMB_JUMP)) {
 			out.action = ACTION_NONE;
 			out.action_ticks = 0;
 		}
@@ -1149,7 +1188,7 @@ private:
 				r_out.rotation = facing_rotation(face, p_g.up);
 			}
 		}
-		if (r_out.action_ticks >= p_move.ticks) {
+		if (r_out.action_ticks >= p_move.ticks && r_out.action != ACTION_DEATH) {
 			r_out.action = ACTION_NONE;
 			r_out.action_ticks = 0;
 		}

@@ -157,10 +157,14 @@ private:
 		uint32_t swing_start = 0;
 		LocalVector<uint64_t> swing_hits;
 		uint32_t cast_start = UINT32_MAX; // the aimed move last announced (MSG_CAST), by its start tick
+		// Not a player but a walker all the same, stepped from `npc_input` (set_entity_input): an enemy.
+		bool npc = false;
+		PlanetNet::WalkerInput npc_input;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
 	};
 
+	static bool has_walker(const Entity &p_entity) { return p_entity.state.type == ENTITY_TYPE_PLAYER || p_entity.npc; }
 	static PlanetNet::WalkerState walker_state(const Entity &p_entity) {
 		PlanetNet::WalkerState s = p_entity.walk;
 		s.position = p_entity.state.position;

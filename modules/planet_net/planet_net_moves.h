@@ -61,11 +61,20 @@ enum WalkerAction : uint8_t {
 	ACTION_CLIMB_JUMP = 8, // a climb jump, a dyno (Walker::dash_windup, dash_ticks): the wall's, not the table's
 	ACTION_FLINCH = 9, // hit, poise broken by a light blow: a short interruption
 	ACTION_KNOCKDOWN = 10, // hit, poise broken by a crushing blow: on the floor
+	ACTION_DEATH = 11, // health gone: down for good (whoever owns the body decides what follows)
 	// Abilities: not the weapon's (COMBAT_DESIGN.md section 4). Slotted in WalkerState::loadout.
 	ACTION_EMBER = 16, // an aimed burst on the ground: mobile, fragile
 	ACTION_GUST = 17, // a cone that blows back what is in front: mobile, fragile
 	ACTION_SLAM = 18, // the blade driven into the ground, crushing what is round: committed, armoured
 	ACTION_COUNT = 19,
+};
+
+// What a blow did to what it reached (Walker::strike; MSG_HIT).
+enum HitResult : uint8_t {
+	HIT_STRUCK = 1,
+	HIT_BLOCKED = 2, // on the guard: stamina, no damage
+	HIT_GUARD_BROKEN = 3, // on a guard without the stamina to hold it: staggered, no damage
+	HIT_DODGED = 4, // through a dodge's untouchable ticks (or a body down)
 };
 
 enum MoveKind : uint8_t {
@@ -314,6 +323,14 @@ struct MoveTable {
 		knockdown.root = ROOT_BRAKE;
 		knockdown.invulnerable_from = 10;
 		knockdown.invulnerable_to = 40;
+
+		// Dead: down, untouchable, no control, for as long as whoever owns the body leaves it so.
+		Move &death = t.moves[ACTION_DEATH];
+		death.name = "death";
+		death.kind = KIND_REACTION;
+		death.ticks = 255;
+		death.root = ROOT_BRAKE;
+		death.invulnerable_to = 255;
 
 		Move &climb_jump = t.moves[ACTION_CLIMB_JUMP];
 		climb_jump.name = "climb_jump";

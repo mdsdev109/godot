@@ -35,6 +35,8 @@
 // Everything is little-endian, which every platform the game targets is; values are copied byte for
 // byte, so a double written on one machine reads back as the same double on another.
 
+#include "planet_net_moves.h"
+
 #include "core/math/math_funcs.h"
 #include "core/math/planet_lattice.h"
 #include "core/math/quaternion.h"
@@ -87,13 +89,7 @@ enum MessageType : uint8_t {
 	//           An aimed move (SHAPE_AREA) begun, for drawing its area through the windup.
 };
 
-// What a swing did to what it reached (MSG_HIT).
-enum HitResult : uint8_t {
-	HIT_STRUCK = 1,
-	HIT_BLOCKED = 2, // on the guard: stamina, no damage
-	HIT_GUARD_BROKEN = 3, // on a guard without the stamina to hold it: staggered, no damage
-	HIT_DODGED = 4, // through a dodge's untouchable ticks
-};
+// What a swing did to what it reached (MSG_HIT): HitResult, planet_net_moves.h.
 
 // Ids carry the server that created them in the top 16 bits, so they stay unique across servers.
 constexpr int ENTITY_SERVER_SHIFT = 48;
