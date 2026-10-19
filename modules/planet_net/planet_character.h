@@ -233,7 +233,7 @@ public:
 		}
 	}
 	bool get_no_climb() const { return (state.flags & PlanetNet::FLAG_NO_CLIMB) != 0; }
-	// Crouched (sneaking): toggled by the crouch button (PlanetNet::BUTTON_CROUCH, 256) on the ground.
+	// Crouched (sneaking): toggled by the dodge button pressed standing still, on the ground (Walker::step).
 	bool is_crouching() const { return (state.flags & PlanetNet::FLAG_CROUCH) != 0; }
 	void set_dead(bool p_dead) {
 		state.action = p_dead ? PlanetNet::ACTION_DEATH : PlanetNet::ACTION_NONE;
