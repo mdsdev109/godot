@@ -329,6 +329,15 @@ public:
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr ? int(e->team) : 0;
 	}
+	// Console commands (MSG_COMMAND, MSG_MESSAGE): a client's typed line arrives as `command_received(peer,
+	// entity_id, line)`, raw -- the scripts parse and route it (planet-demo net/commands/) -- and what
+	// it says back, or anything else for a player to read, goes out by channel (MessageChannel: info,
+	// error, chat, system).
+	void send_message(int p_peer, int p_channel, const String &p_text);
+	void broadcast_message(int p_channel, const String &p_text);
+	// The peer a player's entity is (0: not a player, or gone).
+	int get_entity_peer(int64_t p_id) const;
+	enum { MESSAGE_INFO = PlanetNet::MESSAGE_INFO, MESSAGE_ERROR = PlanetNet::MESSAGE_ERROR, MESSAGE_CHAT = PlanetNet::MESSAGE_CHAT, MESSAGE_SYSTEM = PlanetNet::MESSAGE_SYSTEM };
 	void set_entity_awareness(int64_t p_id, int p_level) {
 		Entity *e = entities.getptr(uint64_t(p_id));
 		ERR_FAIL_NULL(e);

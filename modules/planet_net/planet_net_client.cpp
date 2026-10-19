@@ -128,6 +128,16 @@ void PlanetNetClient::_send_look() {
 	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
 }
 
+void PlanetNetClient::send_command(const String &p_line) {
+	if (!welcomed || p_line.strip_edges().is_empty()) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_COMMAND);
+	w.text(p_line);
+	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
 void PlanetNetClient::request_teleport(const Vector3 &p_point) {
 	if (!welcomed) {
 		return;
@@ -485,6 +495,13 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 				emit_signal(SNAME("hit"), hit);
 			}
 		} break;
+		case MSG_MESSAGE: {
+			const uint8_t channel = r.u8();
+			const String text = r.text();
+			if (r.ok()) {
+				emit_signal(SNAME("message"), int(channel), text);
+			}
+		} break;
 		case MSG_HEALTH: {
 			const uint16_t h = r.u16();
 			const uint16_t m = r.u16();
@@ -764,6 +781,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_exclude", "body"), &PlanetNetClient::add_exclude);
 	ClassDB::bind_method(D_METHOD("clear_excludes"), &PlanetNetClient::clear_excludes);
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
+	ClassDB::bind_method(D_METHOD("send_command", "line"), &PlanetNetClient::send_command);
+	ADD_SIGNAL(MethodInfo("message", PropertyInfo(Variant::INT, "channel"), PropertyInfo(Variant::STRING, "text")));
 	ClassDB::bind_method(D_METHOD("set_look", "look"), &PlanetNetClient::set_look);
 	ClassDB::bind_method(D_METHOD("set_solid_type", "type", "radius"), &PlanetNetClient::set_solid_type);
 	ClassDB::bind_method(D_METHOD("get_solid_types"), &PlanetNetClient::get_solid_types);

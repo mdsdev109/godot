@@ -379,6 +379,29 @@ void PlanetNetServer::_resolve_swings() {
 	}
 }
 
+void PlanetNetServer::send_message(int p_peer, int p_channel, const String &p_text) {
+	const Client *c = clients.getptr(p_peer);
+	if (c == nullptr || !c->welcomed) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_MESSAGE);
+	w.u8(uint8_t(CLAMP(p_channel, 0, 255)));
+	w.text(p_text);
+	link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
+void PlanetNetServer::broadcast_message(int p_channel, const String &p_text) {
+	for (KeyValue<int, Client> &C : clients) {
+		send_message(C.key, p_channel, p_text);
+	}
+}
+
+int PlanetNetServer::get_entity_peer(int64_t p_id) const {
+	const Entity *e = entities.getptr(uint64_t(p_id));
+	return e != nullptr ? int(e->owner_peer) : 0;
+}
+
 void PlanetNetServer::_send_health(const Entity &p_entity) {
 	// To the player it is, only: its own health, when it changes (not in every snapshot, where four bytes
 	// more starved a budget-limited client's farthest entities).
@@ -663,6 +686,14 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				return;
 			}
 			store_walker_state(*e, walker.place(walker_state(*e), point));
+		} break;
+		case MSG_COMMAND: {
+			// A console line, raw: the scripts parse, route and permit it (command_received).
+			const String line = r.text();
+			if (!r.ok() || !client->welcomed || line.strip_edges().is_empty()) {
+				return;
+			}
+			emit_signal(SNAME("command_received"), p_peer, int64_t(client->entity), line);
 		} break;
 		case MSG_LOOK: {
 			const uint64_t look = r.u64();
@@ -1575,6 +1606,14 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_entity_input", "id", "move", "yaw", "buttons", "abilities", "aim"), &PlanetNetServer::set_entity_input, DEFVAL(0), DEFVAL(Vector3()));
 	ClassDB::bind_method(D_METHOD("get_entity_walker", "id"), &PlanetNetServer::get_entity_walker);
 	ClassDB::bind_method(D_METHOD("set_entity_team", "id", "team"), &PlanetNetServer::set_entity_team);
+	ClassDB::bind_method(D_METHOD("send_message", "peer", "channel", "text"), &PlanetNetServer::send_message);
+	ClassDB::bind_method(D_METHOD("broadcast_message", "channel", "text"), &PlanetNetServer::broadcast_message);
+	ClassDB::bind_method(D_METHOD("get_entity_peer", "id"), &PlanetNetServer::get_entity_peer);
+	ADD_SIGNAL(MethodInfo("command_received", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id"), PropertyInfo(Variant::STRING, "line")));
+	BIND_CONSTANT(MESSAGE_INFO);
+	BIND_CONSTANT(MESSAGE_ERROR);
+	BIND_CONSTANT(MESSAGE_CHAT);
+	BIND_CONSTANT(MESSAGE_SYSTEM);
 	ClassDB::bind_method(D_METHOD("set_entity_awareness", "id", "level"), &PlanetNetServer::set_entity_awareness);
 	ClassDB::bind_method(D_METHOD("get_entity_awareness", "id"), &PlanetNetServer::get_entity_awareness);
 	ClassDB::bind_method(D_METHOD("get_entity_team", "id"), &PlanetNetServer::get_entity_team);

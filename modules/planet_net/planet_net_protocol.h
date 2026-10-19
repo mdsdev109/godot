@@ -41,6 +41,7 @@
 #include "core/math/planet_lattice.h"
 #include "core/math/quaternion.h"
 #include "core/math/vector3.h"
+#include "core/string/ustring.h"
 #include "core/templates/local_vector.h"
 
 #include <cstdint>
@@ -59,7 +60,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 17;
+constexpr uint16_t PROTOCOL_VERSION = 18;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u16 n, n bytes of player key (UTF-8; empty: anonymous)
@@ -88,7 +89,22 @@ enum MessageType : uint8_t {
 	MSG_CAST, // server -> client, control: u64 caster, u8 move, f64 x3 where it lands, u32 tick it started.
 	//           An aimed move (SHAPE_AREA) begun, for drawing its area through the windup.
 	MSG_HEALTH, // server -> client, control: u16 health, u16 health max. The player's own, when it changes.
+	MSG_COMMAND, // client -> server, control: text (u16 n, n bytes UTF-8, at most MAX_COMMAND). A line typed
+	//              at the console, raw: parsing, routing and permissions are the server's scripts'
+	//              (PlanetNetServer::command_received; planet-demo net/commands/).
+	MSG_MESSAGE, // server -> client, control: u8 channel, text. Something for the player to read -- a
+	//              command's reply, chat (PlanetNetClient::message; MessageChannel).
 };
+
+// What a MSG_MESSAGE is: how the client shows it. The scripts' to name; these are the ones so far.
+enum MessageChannel : uint8_t {
+	MESSAGE_INFO = 0, // a command's output, to its sender
+	MESSAGE_ERROR = 1, // a command refused or failed
+	MESSAGE_CHAT = 2, // someone's words
+	MESSAGE_SYSTEM = 3, // the server's own notices
+};
+
+constexpr int MAX_COMMAND = 1024; // bytes of a command line or a message's text
 
 // What a swing did to what it reached (MSG_HIT): HitResult, planet_net_moves.h.
 
@@ -291,6 +307,15 @@ public:
 	void u64(uint64_t p_v) { put(p_v); }
 	void f32(float p_v) { put(p_v); }
 	void f64(double p_v) { put(p_v); }
+	// A string: u16 length, then its UTF-8 bytes, cut to MAX_COMMAND.
+	void text(const String &p_text) {
+		const CharString utf8 = p_text.utf8();
+		const uint16_t n = uint16_t(MIN(utf8.length(), MAX_COMMAND));
+		u16(n);
+		for (uint16_t i = 0; i < n; ++i) {
+			u8(uint8_t(utf8[i]));
+		}
+	}
 
 	// A snapshot record: the fields of `p_now` that differ from `p_base` (all of them without one).
 	// Returns false, writing nothing, when there is a baseline and nothing differs.
@@ -392,6 +417,16 @@ public:
 	uint64_t u64() { return get<uint64_t>(); }
 	float f32() { return get<float>(); }
 	double f64() { return get<double>(); }
+	String text() {
+		const uint16_t n = u16();
+		if (!good || n > MAX_COMMAND || at + n > size) {
+			good = false;
+			return String();
+		}
+		String s = String::utf8(reinterpret_cast<const char *>(bytes + at), n);
+		at += n;
+		return s;
+	}
 
 	// The fields a record carries, applied over `r_wire` (which holds the baseline, or anything for a
 	// FULL record). Separate statements throughout: argument evaluation order is unspecified.

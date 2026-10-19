@@ -181,6 +181,8 @@ public:
 	// Asks the server to put our player on the ground at a point (PlanetNetServer::allow_teleport).
 	// The prediction moves there at once.
 	void request_teleport(const Vector3 &p_point);
+	// A console line to the server (MSG_COMMAND), raw; what it says back comes as `message(channel, text)`.
+	void send_command(const String &p_line);
 	// How our player is drawn to everyone else (EntityState::look): sent now if connected, and again on
 	// every welcome, so a reconnect keeps it. 0 sends nothing.
 	// Bodies the walkers cannot pass through (Walker::body_feet): entities of these types, each type its
