@@ -67,9 +67,8 @@ enum WalkerFlag : uint8_t {
 	// Never climbs: walls stop it, as an unclimbable face stops anyone (an NPC: docs/COMBAT.md, "The
 	// bandit"). Kept, unlike the others: whoever makes the walker sets it.
 	FLAG_NO_CLIMB = 4,
-	// Crouched (sneaking): slower and quieter, on the ground only. Toggled by the dodge's button pressed
-	// with no way to roll (the stick at rest, no move going); a sprint, a jump, any move -- a dodge with a
-	// way to go among them -- or leaving the ground stands it up.
+	// Crouched (sneaking): slower and quieter, on the ground only. Toggled by BUTTON_CROUCH; a sprint, a
+	// jump, any move, or leaving the ground stands it up.
 	FLAG_CROUCH = 8,
 };
 
@@ -82,6 +81,7 @@ enum WalkerButton : uint16_t {
 	BUTTON_HEAVY = 32, // a heavy attack
 	BUTTON_BLOCK = 64, // held: guard
 	BUTTON_LOCK = 128, // held: face the way of `yaw` (a locked-on target) rather than the way it moves
+	BUTTON_CROUCH = 256, // pressed: crouch, or stand up (FLAG_CROUCH)
 };
 
 // What the walker is doing on top of its mode is a move: WalkerAction, in planet_net_moves.h.
@@ -1000,15 +1000,11 @@ struct Walker {
 		const uint16_t pressed = p_input.buttons & ~p_state.latch;
 		const bool moving = wish.length_squared() > 1e-12;
 		const bool sprinting = (p_input.buttons & BUTTON_SPRINT) && moving && !(p_state.flags & FLAG_EXHAUSTED);
-		// Crouched: the dodge's button with no way to roll -- the stick at rest, on the ground, no move
-		// going -- crouches or stands up instead of rolling (the user's: one button, as BotW has one for
-		// both). In a move it is a dodge still, a cancel rolling the way it faces. A sprint or a jump stands
-		// it up (and a move, or leaving the ground, below).
+		// Crouched, toggled by its press; a sprint or a jump stands it up (and a move, or leaving the ground,
+		// below).
 		bool crouched = (p_state.flags & FLAG_CROUCH) != 0;
-		uint16_t pressed_moves = pressed;
-		if ((pressed & BUTTON_DODGE) && !moving && p_state.mode == MODE_GROUND && !move_of(p_state).committed()) {
+		if (pressed & BUTTON_CROUCH) {
 			crouched = !crouched;
-			pressed_moves &= uint16_t(~BUTTON_DODGE);
 		}
 		if (sprinting || (pressed & BUTTON_JUMP)) {
 			crouched = false;
@@ -1032,7 +1028,7 @@ struct Walker {
 		const uint8_t pressed_abilities = p_input.abilities & ~p_state.ability_latch;
 		out.ability_latch = p_input.abilities;
 		// The input buffer: this tick's press, or one still waiting.
-		const uint8_t pressed_intent = _intent(pressed_moves, pressed_abilities);
+		const uint8_t pressed_intent = _intent(pressed, pressed_abilities);
 		if (pressed_intent != INTENT_NONE) {
 			out.buffer = pressed_intent;
 			out.buffer_ticks = buffer_ticks;
