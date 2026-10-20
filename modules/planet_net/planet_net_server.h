@@ -387,6 +387,19 @@ public:
 	// servers).
 	void strike(int64_t p_attacker, int64_t p_target, const Vector3 &p_at);
 
+	// A DM's flight (FLAG_NOCLIP; docs/SERVER_MESH.md, DM mode): through everything, never struck, nobody's
+	// body; its client predicts it from the next snapshot on.
+	void set_entity_noclip(int64_t p_id, bool p_on) {
+		Entity *e = entities.getptr(uint64_t(p_id));
+		ERR_FAIL_NULL(e);
+		PlanetNet::WalkerState s = walker_state(*e);
+		s.flags = p_on ? (s.flags | PlanetNet::FLAG_NOCLIP) : (s.flags & ~PlanetNet::FLAG_NOCLIP);
+		store_walker_state(*e, s);
+	}
+	bool is_entity_noclip(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr && (e->walk.flags & PlanetNet::FLAG_NOCLIP);
+	}
 	// One region at a time (docs/SERVER_MESH.md: a cell is a region): its persistent entities and its
 	// journal written to its file -- and, unloading, dropped from this server, when it goes to another
 	// owner or to sleep. Loading reads them back, as owned. Players are never in a region's file.

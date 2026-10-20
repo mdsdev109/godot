@@ -361,7 +361,7 @@ void PlanetNetClient::_gather_bodies() {
 		}
 		const EntityState &st = E.value.samples[E.value.samples.size() - 1].state;
 		const double *r = solid_types.getptr(int(st.type));
-		if (r != nullptr && st.position.distance_squared_to(predicted.position) < 100.0) {
+		if (r != nullptr && !(st.pose & POSE_NOCLIP) && st.position.distance_squared_to(predicted.position) < 100.0) {
 			walker.body_feet.push_back(st.position);
 			walker.body_radii.push_back(*r);
 		}

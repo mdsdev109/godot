@@ -181,6 +181,7 @@ Dictionary PlanetNetServer::get_entity_walker(int64_t p_id) const {
 	d["health_max"] = int(e->health_max);
 	d["dead"] = s.action == ACTION_DEATH;
 	d["no_climb"] = (s.flags & FLAG_NO_CLIMB) != 0;
+	d["noclip"] = (s.flags & FLAG_NOCLIP) != 0;
 	d["crouch"] = (s.flags & FLAG_CROUCH) != 0;
 	return d;
 }
@@ -724,6 +725,13 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			if (!allow_teleport || point.length_squared() < 1.0) {
 				return;
 			}
+			// The scripts first: what stands there (content, colliders) can be made solid before the walker is
+			// placed on it.
+			emit_signal(SNAME("teleport_requested"), int64_t(client->entity), point);
+			e = entities.getptr(client->entity);
+			if (e == nullptr) {
+				return;
+			}
 			store_walker_state(*e, walker.place(walker_state(*e), point));
 		} break;
 		case MSG_COMMAND: {
@@ -1195,7 +1203,7 @@ void PlanetNetServer::_step() {
 	if (!solid_types.is_empty()) {
 		for (const KeyValue<uint64_t, Entity> &E : entities) {
 			const double *r = solid_types.getptr(int(E.value.state.type));
-			if (r != nullptr) {
+			if (r != nullptr && !(E.value.walk.flags & FLAG_NOCLIP)) {
 				solid_ids.push_back(E.key);
 				// Where the clients have it: through the wire's rounding, so a prediction against a body
 				// that stands still is exact.
@@ -2171,6 +2179,9 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_client_key", "peer"), &PlanetNetServer::get_client_key);
 	ClassDB::bind_method(D_METHOD("strike", "attacker", "target", "at"), &PlanetNetServer::strike);
 	ClassDB::bind_method(D_METHOD("relay_hit", "hit"), &PlanetNetServer::relay_hit);
+	ClassDB::bind_method(D_METHOD("set_entity_noclip", "id", "on"), &PlanetNetServer::set_entity_noclip);
+	ClassDB::bind_method(D_METHOD("is_entity_noclip", "id"), &PlanetNetServer::is_entity_noclip);
+	ADD_SIGNAL(MethodInfo("teleport_requested", PropertyInfo(Variant::INT, "entity_id"), PropertyInfo(Variant::VECTOR3, "point")));
 	ClassDB::bind_method(D_METHOD("set_space", "space"), &PlanetNetServer::set_space);
 	ClassDB::bind_method(D_METHOD("get_space"), &PlanetNetServer::get_space);
 	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetNetServer::set_use_terrain);

@@ -70,6 +70,10 @@ enum WalkerFlag : uint8_t {
 	// Crouched (sneaking): slower and quieter, on the ground only. Toggled by BUTTON_CROUCH; a sprint, a
 	// jump, any move, or leaving the ground stands it up.
 	FLAG_CROUCH = 8,
+	// A DM's flight (planet-demo docs/SERVER_MESH.md, DM mode): through everything, no gravity, no stamina,
+	// up and down by jump and let-go, never struck, never in anyone's way. Kept, like FLAG_NO_CLIMB: the
+	// server sets it.
+	FLAG_NOCLIP = 16,
 };
 
 enum WalkerButton : uint16_t {
@@ -234,9 +238,12 @@ inline bool same_walk(const WalkerState &a, const WalkerState &b) {
 // the eight above them, crouched in bit 12 (POSE_CROUCH); bits 13-14 an NPC's awareness, set by the server
 // (POSE_AWARE_SHIFT: 0 unaware, 1 suspicious, 2 alerted). Replicated with every entity (EntityState::pose).
 constexpr uint16_t POSE_CROUCH = 1u << 12;
+// A DM in flight (FLAG_NOCLIP): drawn as one, and nobody's body to bump into.
+constexpr uint16_t POSE_NOCLIP = 1u << 15;
 constexpr int POSE_AWARE_SHIFT = 13;
 inline uint16_t pose_of(const WalkerState &p_state) {
-	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4) | ((p_state.flags & FLAG_CROUCH) ? POSE_CROUCH : 0u));
+	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4) | ((p_state.flags & FLAG_CROUCH) ? POSE_CROUCH : 0u) |
+			((p_state.flags & FLAG_NOCLIP) ? POSE_NOCLIP : 0u));
 }
 inline uint8_t pose_action(uint16_t p_pose) { return uint8_t((p_pose >> 4) & 0xFFu); }
 
@@ -262,6 +269,7 @@ struct Walker {
 	double sprint_speed = 8.0;
 	// Crouched: a sneak, 2 m/s (the crouch walk's own pace, as BotW's sneak is about a walk's).
 	double crouch_speed = 2.0;
+	double fly_speed = 30.0; // a DM's flight (FLAG_NOCLIP), m/s
 	// A blow in the back: a weapon's blow from within back_arc degrees of straight behind its target lands
 	// back_multiplier times its damage and knocks it down, whatever its poise or armour -- positional, as
 	// Dark Souls' backstab is, not by whether the target noticed (which no one can judge of a player in
@@ -742,7 +750,7 @@ struct Walker {
 		out.velocity = Vector3();
 		out.mode = MODE_GROUND;
 		out.normal = Vector3();
-		out.flags = p_state.flags & FLAG_NO_CLIMB; // what the walker is, not what it was doing
+		out.flags = p_state.flags & (FLAG_NO_CLIMB | FLAG_NOCLIP); // what the walker is, not what it was doing
 		out.dash = 0;
 		out.reference = transport(p_state.reference, up_at(on));
 		return out;
@@ -770,7 +778,7 @@ struct Walker {
 
 	// Whether hits pass through this walker this tick: a move's untouchable window (the dodge's).
 	bool invulnerable(const WalkerState &p_state) const {
-		if (p_state.action == ACTION_DEATH) {
+		if (p_state.action == ACTION_DEATH || (p_state.flags & FLAG_NOCLIP)) {
 			return true;
 		}
 		const Move &m = move_of(p_state);
@@ -996,6 +1004,24 @@ struct Walker {
 		Vector3 wish = forward * my + right * mx;
 		if (wish.length_squared() > 1.0) {
 			wish = wish.normalized();
+		}
+		if (p_state.flags & FLAG_NOCLIP) {
+			// A DM's flight: straight where it is steered, up by jump, down by let-go, sprint four times faster.
+			WalkerState out = p_state;
+			Vector3 fly = forward * my + right * mx + up * (((p_input.buttons & BUTTON_JUMP) ? 1.0 : 0.0) - ((p_input.buttons & BUTTON_DROP) ? 1.0 : 0.0));
+			if (fly.length_squared() > 1.0) {
+				fly = fly.normalized();
+			}
+			out.velocity = fly * ((p_input.buttons & BUTTON_SPRINT) ? fly_speed * 4.0 : fly_speed);
+			out.position = p_state.position + out.velocity * p_dt;
+			out.mode = MODE_AIR;
+			out.action = ACTION_NONE;
+			out.action_ticks = 0;
+			out.dash = 0;
+			out.latch = p_input.buttons;
+			out.reference = transport(p_state.reference, up_at(out.position));
+			out.rotation = facing_rotation(forward, up);
+			return out;
 		}
 		const uint16_t pressed = p_input.buttons & ~p_state.latch;
 		const bool moving = wish.length_squared() > 1e-12;
