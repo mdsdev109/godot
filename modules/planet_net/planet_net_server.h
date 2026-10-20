@@ -389,6 +389,10 @@ public:
 
 	// A DM's flight (FLAG_NOCLIP; docs/SERVER_MESH.md, DM mode): through everything, never struck, nobody's
 	// body; its client predicts it from the next snapshot on.
+	// A player coming from another zone's servers (planet-demo docs/SYSTEM_WORLD.md, "Everything is a zone"):
+	// made here, at `p_position`, waiting for its client's key, so that the client's switch binds to it as a
+	// handoff's does. A DM's (noclip) stays one.
+	int64_t expect_player(const String &p_key, const Vector3 &p_position, bool p_noclip);
 	void set_entity_noclip(int64_t p_id, bool p_on) {
 		Entity *e = entities.getptr(uint64_t(p_id));
 		ERR_FAIL_NULL(e);

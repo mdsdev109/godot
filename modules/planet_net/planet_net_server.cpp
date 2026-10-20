@@ -138,6 +138,26 @@ int64_t PlanetNetServer::create_entity(int p_type, const Vector3 &p_position) {
 	return int64_t(_create_with_id((uint64_t(server_id) << ENTITY_SERVER_SHIFT) | next_entity++, p_type, p_position));
 }
 
+int64_t PlanetNetServer::expect_player(const String &p_key, const Vector3 &p_position, bool p_noclip) {
+	ERR_FAIL_COND_V(p_key.is_empty(), 0);
+	const uint64_t already = _awaiting(p_key);
+	if (already != 0) {
+		destroy_entity(int64_t(already));
+	}
+	const int64_t id = create_entity(ENTITY_TYPE_PLAYER, p_position);
+	Entity *e = entities.getptr(uint64_t(id));
+	ERR_FAIL_NULL_V(e, 0);
+	e->await_key = p_key;
+	e->persistent = false;
+	e->team = TEAM_PLAYERS;
+	e->health_max = player_health;
+	e->health = player_health;
+	if (p_noclip) {
+		set_entity_noclip(id, true);
+	}
+	return id;
+}
+
 int64_t PlanetNetServer::create_npc(int p_type, const Vector3 &p_position) {
 	const int64_t id = create_entity(p_type, p_position);
 	Entity *e = entities.getptr(uint64_t(id));
@@ -2147,6 +2167,7 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_region_of", "position"), &PlanetNetServer::get_region_of);
 	ClassDB::bind_method(D_METHOD("get_region_centre", "key"), &PlanetNetServer::get_region_centre);
 	ClassDB::bind_method(D_METHOD("set_volume_cell", "size"), &PlanetNetServer::set_volume_cell);
+	ClassDB::bind_method(D_METHOD("expect_player", "key", "position", "noclip"), &PlanetNetServer::expect_player);
 	ClassDB::bind_method(D_METHOD("get_volume_cell"), &PlanetNetServer::get_volume_cell);
 	ClassDB::bind_method(D_METHOD("get_client_entity", "peer"), &PlanetNetServer::get_client_entity);
 	ClassDB::bind_method(D_METHOD("get_client_peers"), &PlanetNetServer::get_client_peers);
