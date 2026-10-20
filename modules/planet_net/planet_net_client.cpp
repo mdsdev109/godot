@@ -57,6 +57,8 @@ void PlanetNetClient::disconnect_from_server() {
 	clock_samples.clear();
 	next_clock_sample = 0;
 	ping_timer = 0.0;
+	smoothed_rtt = 0.0;
+	lead_valid = false;
 	tracked.clear();
 	handles.clear();
 	newest_seq = 0;
@@ -238,7 +240,17 @@ void PlanetNetClient::_advance_prediction(double p_delta) {
 	}
 	// Run ahead of the server by half a round trip plus a margin, so this tick's input is there
 	// before the server needs it.
-	const double target = server_time + 0.5 * last_rtt * TICK_HZ + prediction_lead_ticks;
+	// The lead -- half a round trip and the margin -- moved smoothly: taken from each ping's own round
+	// trip it jumped by a third of a tick four times a second (pings are read a frame late, so their
+	// round trips jitter by a frame), and the player drawn from it lurched with every jump.
+	const double want = 0.5 * smoothed_rtt * TICK_HZ + prediction_lead_ticks;
+	if (!lead_valid || Math::abs(want - lead_offset) > LEAD_JUMP_TICKS) {
+		lead_offset = want;
+		lead_valid = true;
+	} else {
+		lead_offset += CLAMP(want - lead_offset, -p_delta * LEAD_SLEW, p_delta * LEAD_SLEW);
+	}
+	const double target = server_time + lead_offset;
 	int steps = 0;
 	while (double(predicted_tick) + 1.0 <= target && steps < 8) {
 		++predicted_tick;
@@ -402,6 +414,7 @@ void PlanetNetClient::_on_pong(double p_sent_clock, double p_server_ticks) {
 		return;
 	}
 	last_rtt = rtt;
+	smoothed_rtt = smoothed_rtt <= 0.0 ? rtt : smoothed_rtt + 0.1 * (rtt - smoothed_rtt);
 	// The server read its clock about half a round trip ago. The offset maps local seconds to server
 	// ticks; the sample with the shortest round trip has the least room for asymmetric delay, so it is
 	// the one trusted.

@@ -111,6 +111,13 @@ private:
 	uint32_t next_clock_sample = 0;
 	double ping_timer = 0.0;
 	double last_rtt = 0.0;
+	double smoothed_rtt = 0.0; // the round trip, filtered (a tenth of each new one)
+	// How far ahead of the server's clock the prediction runs, moved toward half the smoothed round trip
+	// plus the lead at LEAD_SLEW ticks a second; further off than LEAD_JUMP_TICKS, it jumps.
+	double lead_offset = 0.0;
+	bool lead_valid = false;
+	static constexpr double LEAD_SLEW = 1.0;
+	static constexpr double LEAD_JUMP_TICKS = 3.0;
 
 	double interpolation_delay_ticks = 3.0;
 	HashMap<uint64_t, Tracked> tracked;
