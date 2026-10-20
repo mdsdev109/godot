@@ -254,6 +254,35 @@ void PlanetNetClient::_advance_prediction(double p_delta) {
 	while (frames.size() > PREDICTION_FRAMES) {
 		frames.remove_at(0);
 	}
+	// How far past the newest predicted tick this frame is, for drawing the player between ticks.
+	display_alpha = CLAMP(target - double(predicted_tick), 0.0, 1.0);
+}
+
+// The player as drawn this frame: between the last two predicted ticks by how far into the next one the
+// clock is -- a tick behind the newest, as offline play draws its walker (PlayerRig.tick_fraction). Drawn
+// at the newest tick itself, a 30 Hz walker on a 60 Hz screen stood still one frame and jumped two ticks'
+// worth the next: a steady judder that looked like rubberbanding though nothing was corrected.
+const PlanetNetClient::Frame *PlanetNetClient::_frame_before() const {
+	if (frames.size() < 2 || frames[frames.size() - 1].tick != predicted_tick || frames[frames.size() - 2].tick + 1 != predicted_tick) {
+		return nullptr;
+	}
+	return &frames[frames.size() - 2];
+}
+
+Vector3 PlanetNetClient::get_predicted_display_position() const {
+	const Frame *before = _frame_before();
+	if (before == nullptr) {
+		return predicted.position + smoothing;
+	}
+	return before->state.position.lerp(predicted.position, display_alpha) + smoothing;
+}
+
+Quaternion PlanetNetClient::get_predicted_display_rotation() const {
+	const Frame *before = _frame_before();
+	if (before == nullptr) {
+		return predicted.rotation;
+	}
+	return before->state.rotation.slerp(predicted.rotation, display_alpha);
 }
 
 void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
@@ -827,6 +856,8 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_predicted_tick"), &PlanetNetClient::get_predicted_tick);
 	ClassDB::bind_method(D_METHOD("get_predicted_position"), &PlanetNetClient::get_predicted_position);
 	ClassDB::bind_method(D_METHOD("get_predicted_rotation"), &PlanetNetClient::get_predicted_rotation);
+	ClassDB::bind_method(D_METHOD("get_predicted_display_position"), &PlanetNetClient::get_predicted_display_position);
+	ClassDB::bind_method(D_METHOD("get_predicted_display_rotation"), &PlanetNetClient::get_predicted_display_rotation);
 	ClassDB::bind_method(D_METHOD("get_predicted_reference"), &PlanetNetClient::get_predicted_reference);
 	ClassDB::bind_method(D_METHOD("get_predicted_position_at", "tick"), &PlanetNetClient::get_predicted_position_at);
 	ClassDB::bind_method(D_METHOD("get_prediction_stats"), &PlanetNetClient::get_prediction_stats);

@@ -83,6 +83,8 @@ private:
 		PlanetNet::WalkerState state; // after applying input
 		uint32_t view = 0; // the tick others were being drawn at when the input was chosen
 	};
+	// The frame a tick before the newest predicted one, or null (none yet, or just reset).
+	const Frame *_frame_before() const;
 
 	PlanetNetLink link;
 	int server_peer = 0;
@@ -139,6 +141,7 @@ private:
 	bool teleport_restart = false;
 	uint32_t last_confirmed_tick = 0;
 	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
+	double display_alpha = 1.0; // this frame's place between the newest predicted tick and the next, 0..1
 	uint64_t prediction_compared = 0;
 	uint64_t prediction_exact = 0;
 	uint64_t prediction_corrections = 0;
@@ -263,6 +266,10 @@ public:
 	int get_predicted_tick() const { return int(predicted_tick); }
 	// The local player where it should be drawn: predicted, with corrections smoothed.
 	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
+	// For drawing: between the last two predicted ticks by this frame's place between them (a tick behind
+	// the newest). The game's decisions take the newest, get_predicted_position.
+	Vector3 get_predicted_display_position() const;
+	Quaternion get_predicted_display_rotation() const;
 	Quaternion get_predicted_rotation() const { return predicted.rotation; }
 	Vector3 get_predicted_velocity() const { return predicted.velocity; }
 	// PlanetNet::WalkerMode: 0 on the ground, 1 in the air, 2 climbing, 3 gliding.

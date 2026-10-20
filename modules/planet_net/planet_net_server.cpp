@@ -303,8 +303,9 @@ void PlanetNetServer::_resolve_swings() {
 		if (t.react > 0 && --t.react == 0) {
 			t.state.pose = 0;
 		}
-		if (t.health_max > 0 && t.health < t.health_max && tick - t.hurt_tick > uint32_t(HEALTH_REST_TICKS) &&
-				!(t.npc && t.walk.action == ACTION_DEATH)) {
+		// An NPC keeps its wounds, as offline play's bandits do: healing every 5 s without a blow, a bandit
+		// fought online was back to full whenever the fight paused.
+		if (t.health_max > 0 && t.health < t.health_max && tick - t.hurt_tick > uint32_t(HEALTH_REST_TICKS) && !t.npc) {
 			t.health = t.health_max;
 			_send_health(t);
 		}
