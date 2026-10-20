@@ -37,8 +37,8 @@ using namespace PlanetNet;
 Error PlanetNetClient::connect_to_server(const String &p_address, int p_port) {
 	disconnect_from_server();
 	move_table_refused = false;
-	server_peer = link.connect_to(p_address, p_port);
-	if (server_peer == 0) {
+	peers[primary] = link().connect_to(p_address, p_port);
+	if (peers[primary] == 0) {
 		return ERR_CANT_CONNECT;
 	}
 	return OK;
@@ -46,8 +46,14 @@ Error PlanetNetClient::connect_to_server(const String &p_address, int p_port) {
 
 void PlanetNetClient::disconnect_from_server() {
 	const bool was = welcomed;
-	link.close();
-	server_peer = 0;
+	links[0].close();
+	links[1].close();
+	peers[0] = 0;
+	peers[1] = 0;
+	primary = 0;
+	standby_up = false;
+	standby_ready = false;
+	stale.clear();
 	link_up = false;
 	welcomed = false;
 	local_entity = 0;
@@ -76,10 +82,137 @@ void PlanetNetClient::disconnect_from_server() {
 	}
 }
 
+void PlanetNetClient::_send_hello(PlanetNetLink &r_link, int p_peer, uint8_t p_flags) {
+	Writer w;
+	w.u8(MSG_HELLO);
+	w.u16(PROTOCOL_VERSION);
+	w.u8(p_flags);
+	const CharString key = player_key.utf8();
+	const int length = MIN(key.length(), 1024);
+	w.u16(uint16_t(length));
+	for (int i = 0; i < length; ++i) {
+		w.u8(uint8_t(key[i]));
+	}
+	r_link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
+Error PlanetNetClient::prepare_switch(const String &p_address, int p_port) {
+	ERR_FAIL_COND_V_MSG(!welcomed, ERR_UNCONFIGURED, "Connect to a server before switching.");
+	if (standby_up && standby_address == p_address && standby_port == p_port) {
+		return OK;
+	}
+	standby().close();
+	standby().conditions = link().conditions;
+	standby_up = false;
+	standby_ready = false;
+	standby_address = p_address;
+	standby_port = p_port;
+	peers[1 - primary] = standby().connect_to(p_address, p_port);
+	if (peers[1 - primary] == 0) {
+		return ERR_CANT_CONNECT;
+	}
+	standby_up = true;
+	return OK;
+}
+
+void PlanetNetClient::_poll_standby() {
+	if (!standby_up || !standby().is_open()) {
+		return;
+	}
+	LocalVector<PlanetNetLink::Event> events;
+	standby().poll(events);
+	for (PlanetNetLink::Event &ev : events) {
+		switch (ev.kind) {
+			case PlanetNetLink::EVENT_CONNECTED:
+				_send_hello(standby(), peers[1 - primary], HELLO_STANDBY);
+				break;
+			case PlanetNetLink::EVENT_DISCONNECTED:
+				standby().close();
+				standby_up = false;
+				standby_ready = false;
+				return;
+			case PlanetNetLink::EVENT_RECEIVED: {
+				if (ev.data.is_empty() || ev.data[0] != MSG_WELCOME) {
+					break; // nothing else is for a standby connection
+				}
+				Reader r(ev.data.ptr(), ev.data.size());
+				r.u8();
+				const uint16_t version = r.u16();
+				const uint16_t sid = r.u16();
+				const uint64_t entity = r.u64();
+				r.f64(); // region radius
+				r.u32(); // regions per edge
+				r.f64(); // walk speed
+				r.u64(); // move hash
+				if (entity != 0) {
+					_read_space(r);
+				}
+				if (!r.ok() || version != PROTOCOL_VERSION) {
+					standby().close();
+					standby_up = false;
+					standby_ready = false;
+					return;
+				}
+				if (entity == 0) {
+					standby_ready = true;
+				} else {
+					_promote(sid, entity);
+					return;
+				}
+			} break;
+		}
+	}
+}
+
+// The next server has our player: it is the one now. Everything known carries over -- the clock (servers
+// share it), the prediction (it stepped the player on the inputs sent to both), the entities (the same
+// ids) -- but not the snapshot bookkeeping, which was the old server's.
+void PlanetNetClient::_promote(uint16_t p_server_id, uint64_t p_entity) {
+	link().close();
+	peers[primary] = 0;
+	primary = 1 - primary;
+	standby_up = false;
+	standby_ready = false;
+	server_id = p_server_id;
+	local_entity = p_entity;
+	handles.clear();
+	newest_seq = 0;
+	ack_bits = 0;
+	last_ack_tick = 0;
+	teleports_requested = 0;
+	teleport_restart = false;
+	stale.clear();
+	for (const KeyValue<uint64_t, Tracked> &E : tracked) {
+		stale.insert(E.key);
+	}
+	switched_at = clock;
+	++switch_count;
+	_send_look();
+	emit_signal(SNAME("switched"), int(p_server_id));
+}
+
+void PlanetNetClient::_read_space(Reader &r_reader) {
+	const uint64_t s = r_reader.u64();
+	const bool terrain = r_reader.u8() != 0;
+	Vector3 down;
+	down.x = r_reader.f64();
+	down.y = r_reader.f64();
+	down.z = r_reader.f64();
+	if (!r_reader.ok()) {
+		return;
+	}
+	walker.use_terrain = terrain;
+	walker.uniform_down = down;
+	if (s != space) {
+		space = s;
+		emit_signal(SNAME("space_changed"), int64_t(s));
+	}
+}
+
 void PlanetNetClient::set_link_conditions(double p_latency_ms, double p_jitter_ms, double p_loss) {
-	link.conditions.latency_ms = p_latency_ms;
-	link.conditions.jitter_ms = p_jitter_ms;
-	link.conditions.loss = p_loss;
+	link().conditions.latency_ms = p_latency_ms;
+	link().conditions.jitter_ms = p_jitter_ms;
+	link().conditions.loss = p_loss;
 }
 
 void PlanetNetClient::send_world_change(const Vector3 &p_point, const PackedByteArray &p_data) {
@@ -96,7 +229,7 @@ void PlanetNetClient::send_world_change(const Vector3 &p_point, const PackedByte
 	for (int i = 0; i < p_data.size(); ++i) {
 		w.u8(p_data[i]);
 	}
-	link.send(server_peer, CHANNEL_WORLD, w.data(), true);
+	link().send(peers[primary], CHANNEL_WORLD, w.data(), true);
 }
 
 void PlanetNetClient::set_input(const Vector2 &p_move, float p_yaw, int p_buttons) {
@@ -127,7 +260,7 @@ void PlanetNetClient::_send_look() {
 	Writer w;
 	w.u8(MSG_LOOK);
 	w.u64(look);
-	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+	link().send(peers[primary], CHANNEL_CONTROL, w.data(), true);
 }
 
 void PlanetNetClient::send_command(const String &p_line) {
@@ -137,7 +270,7 @@ void PlanetNetClient::send_command(const String &p_line) {
 	Writer w;
 	w.u8(MSG_COMMAND);
 	w.text(p_line);
-	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+	link().send(peers[primary], CHANNEL_CONTROL, w.data(), true);
 }
 
 void PlanetNetClient::request_teleport(const Vector3 &p_point) {
@@ -149,7 +282,7 @@ void PlanetNetClient::request_teleport(const Vector3 &p_point) {
 	w.f64(double(p_point.x));
 	w.f64(double(p_point.y));
 	w.f64(double(p_point.z));
-	link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+	link().send(peers[primary], CHANNEL_CONTROL, w.data(), true);
 	++teleports_requested;
 	teleport_restart = true;
 	// Go there now; the server's word, when it comes, will agree to within a tick of walking.
@@ -161,28 +294,19 @@ void PlanetNetClient::request_teleport(const Vector3 &p_point) {
 }
 
 void PlanetNetClient::poll(double p_delta) {
-	if (!link.is_open()) {
+	if (!link().is_open()) {
 		return;
 	}
 	frame_ahead_ticks = 0.0; // the simulation reads its own clock
 	clock += p_delta;
 
 	LocalVector<PlanetNetLink::Event> events;
-	link.poll(events);
+	link().poll(events);
 	for (PlanetNetLink::Event &ev : events) {
 		switch (ev.kind) {
 			case PlanetNetLink::EVENT_CONNECTED: {
 				link_up = true;
-				Writer w;
-				w.u8(MSG_HELLO);
-				w.u16(PROTOCOL_VERSION);
-				const CharString key = player_key.utf8();
-				const int length = MIN(key.length(), 1024);
-				w.u16(uint16_t(length));
-				for (int i = 0; i < length; ++i) {
-					w.u8(uint8_t(key[i]));
-				}
-				link.send(server_peer, CHANNEL_CONTROL, w.data(), true);
+				_send_hello(link(), peers[primary], 0);
 				_send_ping();
 			} break;
 			case PlanetNetLink::EVENT_DISCONNECTED:
@@ -195,6 +319,17 @@ void PlanetNetClient::poll(double p_delta) {
 	}
 	if (!link_up) {
 		return;
+	}
+	_poll_standby();
+	// After a switch, what the new server has not mentioned within a second and a half is not near any
+	// more: the old server would have removed it, and the new one never had it to remove.
+	if (!stale.is_empty() && clock - switched_at > 1.5) {
+		for (const uint64_t id : stale) {
+			if (id != local_entity) {
+				tracked.erase(id);
+			}
+		}
+		stale.clear();
 	}
 
 	_update_clock(p_delta);
@@ -340,7 +475,7 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 		// The server is past our prediction, or it fell out of the history: start again from its word.
 		if (p_tick >= predicted_tick || frames.is_empty() || p_tick < frames[0].tick) {
 			++prediction_resets;
-			smoothing += predicted.position - p_position;
+			smoothing = predicted.position.distance_to(p_position) > SNAP_DISTANCE ? Vector3() : smoothing + predicted.position - p_position;
 			predicted_tick = p_tick;
 			predicted = p_state;
 			frames.clear();
@@ -349,6 +484,15 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 	}
 	++prediction_compared;
 	const Vector3 mine = frames[at].state.position;
+	if (mine.distance_to(p_position) > SNAP_DISTANCE) {
+		// Not a misprediction but a jump the server made: start again from its word, unsmoothed.
+		++prediction_resets;
+		predicted_tick = p_tick;
+		predicted = p_state;
+		frames.clear();
+		smoothing = Vector3();
+		return;
+	}
 	if (same_walk(frames[at].state, p_state)) {
 		++prediction_exact;
 		return;
@@ -422,7 +566,7 @@ void PlanetNetClient::_send_ping() {
 	Writer w;
 	w.u8(MSG_PING);
 	w.f64(clock);
-	link.send(server_peer, CHANNEL_STATE, w.data(), false);
+	link().send(peers[primary], CHANNEL_STATE, w.data(), false);
 }
 
 void PlanetNetClient::_on_pong(double p_sent_clock, double p_server_ticks) {
@@ -495,7 +639,11 @@ void PlanetNetClient::_send_input() {
 		w.f32(float(frames[i].input.aim.z));
 		w.u32(frames[i].view);
 	}
-	link.send(server_peer, CHANNEL_STATE, w.data(), false);
+	link().send(peers[primary], CHANNEL_STATE, w.data(), false);
+	if (standby_ready) {
+		// The next server keeps them for when the player arrives there (docs/SERVER_MESH.md).
+		standby().send(peers[1 - primary], CHANNEL_STATE, w.data(), false);
+	}
 }
 
 void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
@@ -513,6 +661,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const uint32_t region_resolution = r.u32();
 			const double walk_speed = r.f64();
 			const uint64_t move_hash = r.u64();
+			_read_space(r);
 			if (!r.ok() || version != PROTOCOL_VERSION) {
 				disconnect_from_server();
 				return;
@@ -559,6 +708,14 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const String text = r.text();
 			if (r.ok()) {
 				emit_signal(SNAME("message"), int(channel), text);
+			}
+		} break;
+		case MSG_TRANSFER: {
+			const String address = r.text();
+			const uint16_t port = r.u16();
+			if (r.ok()) {
+				prepare_switch(address, port);
+				emit_signal(SNAME("transfer_requested"), address, int(port));
 			}
 		} break;
 		case MSG_HEALTH: {
@@ -704,6 +861,7 @@ void PlanetNetClient::_on_snapshot(Reader &r_reader) {
 		if (t == nullptr) {
 			t = &tracked.insert(id, Tracked())->value;
 		}
+		stale.erase(id);
 		Sample s;
 		s.tick = tick;
 		s.wire = wire;
@@ -821,8 +979,8 @@ Dictionary PlanetNetClient::get_stats() const {
 	d["newest_snapshot_seq"] = newest_seq;
 	d["records_received"] = records_received;
 	d["records_undecodable"] = records_undecodable;
-	d["bytes_sent"] = link.get_bytes_sent();
-	d["bytes_received"] = link.get_bytes_received();
+	d["bytes_sent"] = link().get_bytes_sent();
+	d["bytes_received"] = link().get_bytes_received();
 	return d;
 }
 
@@ -912,6 +1070,18 @@ void PlanetNetClient::_bind_methods() {
 			PropertyInfo(Variant::PACKED_BYTE_ARRAY, "data")));
 	ClassDB::bind_method(D_METHOD("send_world_change", "point", "data"), &PlanetNetClient::send_world_change);
 	ADD_SIGNAL(MethodInfo("disconnected"));
+	ADD_SIGNAL(MethodInfo("switched", PropertyInfo(Variant::INT, "server_id")));
+	ADD_SIGNAL(MethodInfo("space_changed", PropertyInfo(Variant::INT, "space")));
+	ClassDB::bind_method(D_METHOD("get_space"), &PlanetNetClient::get_space);
+	ADD_SIGNAL(MethodInfo("transfer_requested", PropertyInfo(Variant::STRING, "address"), PropertyInfo(Variant::INT, "port")));
+	ClassDB::bind_method(D_METHOD("prepare_switch", "address", "port"), &PlanetNetClient::prepare_switch);
+	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetNetClient::set_use_terrain);
+	ClassDB::bind_method(D_METHOD("get_use_terrain"), &PlanetNetClient::get_use_terrain);
+	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetNetClient::set_uniform_down);
+	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetNetClient::get_uniform_down);
+	ClassDB::bind_method(D_METHOD("is_switch_pending"), &PlanetNetClient::is_switch_pending);
+	ClassDB::bind_method(D_METHOD("get_switch_count"), &PlanetNetClient::get_switch_count);
+	ClassDB::bind_method(D_METHOD("get_server_id"), &PlanetNetClient::get_server_id);
 	// A swing the server judged, involving something this client sees: {attacker, target, result
 	// (PlanetNet::HitResult: 1 struck, 2 blocked, 3 guard broken, 4 dodged), attack, damage, health, point}.
 	ADD_SIGNAL(MethodInfo("hit", PropertyInfo(Variant::DICTIONARY, "hit")));

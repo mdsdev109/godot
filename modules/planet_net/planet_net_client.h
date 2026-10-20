@@ -49,6 +49,7 @@
 #include "planet_net_walker.h"
 
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_set.h"
 
 class PlanetNetClient : public RefCounted {
 	GDCLASS(PlanetNetClient, RefCounted);
@@ -88,8 +89,24 @@ private:
 	bool _display_pair(const Frame *&r_before, const Frame *&r_after, double &r_t) const;
 	static constexpr double DISPLAY_LAG_TICKS = 1.5;
 
-	PlanetNetLink link;
-	int server_peer = 0;
+	// Two connections: the server this client plays on, and -- ahead of a switch (MSG_TRANSFER) -- the
+	// next, on standby (docs/SERVER_MESH.md). A switch swaps them.
+	PlanetNetLink links[2];
+	int peers[2] = { 0, 0 };
+	int primary = 0;
+	PlanetNetLink &link() { return links[primary]; }
+	const PlanetNetLink &link() const { return links[primary]; }
+	PlanetNetLink &standby() { return links[1 - primary]; }
+	bool standby_up = false; // connected, hello sent
+	bool standby_ready = false; // welcomed with no entity: inputs go there too
+	String standby_address;
+	int standby_port = 0;
+	int switch_count = 0;
+	double switched_at = -1.0; // `clock` at the last switch
+	HashSet<uint64_t> stale; // entities from before the last switch the new server has not mentioned yet
+	void _poll_standby();
+	void _promote(uint16_t p_server_id, uint64_t p_entity);
+	void _send_hello(PlanetNetLink &r_link, int p_peer, uint8_t p_flags);
 	bool link_up = false;
 	bool welcomed = false;
 	// The server's move table was not this client's, and it left (planet_net_moves.h). A test sets the
@@ -101,6 +118,13 @@ private:
 	uint64_t move_hash_override = 0;
 	uint64_t local_entity = 0;
 	uint16_t server_id = 0;
+	// The space the server runs (its welcome): 0 the planet, else a zone, whose walker has no terrain and a
+	// uniform down. A change is signalled (space_changed) for the game to show the other place.
+	uint64_t space = 0;
+	void _read_space(PlanetNet::Reader &r_reader);
+	// A word about our player this far from the prediction is a jump, not an error: taken as it is, not
+	// smoothed (a zone entered, a teleport by another server's say).
+	static constexpr double SNAP_DISTANCE = 25.0;
 	PlanetNet::Regions regions;
 
 	// Seconds since connect_to_server(), advanced by poll().
@@ -174,6 +198,14 @@ protected:
 
 public:
 	Error connect_to_server(const String &p_address, int p_port);
+	// Connects to the next server on standby, ahead of a switch (docs/SERVER_MESH.md): inputs go to both
+	// until the next server says it has the player, and then it is the one. A server's MSG_TRANSFER does
+	// this by itself.
+	Error prepare_switch(const String &p_address, int p_port);
+	bool is_switch_pending() const { return standby_up; }
+	int get_switch_count() const { return switch_count; }
+	int get_server_id() const { return int(server_id); }
+	int64_t get_space() const { return int64_t(space); }
 	void disconnect_from_server();
 	// True once the server has welcomed us and assigned our entity.
 	bool is_server_connected() const { return welcomed; }
@@ -271,6 +303,12 @@ public:
 	void add_exclude(const RID &p_body) { walker.exclude.insert(p_body); }
 	void clear_excludes() { walker.exclude.clear(); }
 
+	// A zone's walker (PlanetNetServer::set_use_terrain, set_uniform_down): the server's, or every step
+	// is mispredicted.
+	void set_use_terrain(bool p_use) { walker.use_terrain = p_use; }
+	bool get_use_terrain() const { return walker.use_terrain; }
+	void set_uniform_down(const Vector3 &p_down) { walker.uniform_down = p_down; }
+	Vector3 get_uniform_down() const { return walker.uniform_down; }
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }
@@ -332,5 +370,8 @@ public:
 
 	Dictionary get_stats() const;
 
-	~PlanetNetClient() { link.close(); }
+	~PlanetNetClient() {
+		links[0].close();
+		links[1].close();
+	}
 };

@@ -132,6 +132,9 @@ private:
 		uint32_t next_handle = 1;
 		// Regions whose world-change journal this client has been sent; new changes there follow.
 		HashSet<uint32_t> journal_regions;
+		// Connected ahead of a switch from another server (docs/SERVER_MESH.md): welcomed with no entity,
+		// its inputs kept, until its player is handed here (import_entities) and bound to it.
+		bool standby = false;
 	};
 
 	struct Entity {
@@ -169,6 +172,15 @@ private:
 		uint8_t awareness = 0;
 		Vector3 history[HISTORY_TICKS];
 		uint32_t history_tick[HISTORY_TICKS] = {};
+		// Another server's, shown here (docs/SERVER_MESH.md): never stepped, struck or saved -- its owner
+		// sends its state (import_entities with mirror), and a blow on it is the owner's to judge
+		// (mirror_struck).
+		bool mirror = false;
+		// A player handed here from another server, or brought back by the world above, waiting for its
+		// client: the first to arrive with this key (standby or not) is bound to it.
+		String await_key;
+		// The tick its walker state is from, when it was handed here: stepped on to the present when bound.
+		uint32_t walk_tick = 0;
 	};
 
 	static bool has_walker(const Entity &p_entity) { return p_entity.state.type == ENTITY_TYPE_PLAYER || p_entity.npc; }
@@ -202,6 +214,10 @@ private:
 	uint32_t tick = 0;
 	uint32_t snapshot_seq = 0;
 	double accumulator = 0.0;
+	// The shared clock (set_epoch): ticks counted from this wall-clock moment, the same on every server.
+	// Negative: none, the tick counts poll()'s deltas as before.
+	double epoch = -1.0;
+	uint64_t space = 0;
 	double planet_radius = 150000.0;
 	PlanetNet::Walker walker;
 	Vector3 spawn_direction = Vector3(0, 1, 0);
@@ -222,6 +238,12 @@ private:
 	void _strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at);
 	void _send_cast(uint64_t p_caster, const Entity &p_entity, uint32_t p_start);
 	void _send_health(const Entity &p_entity);
+	void _send_welcome(int p_peer, uint64_t p_entity);
+	// Binds a client to a player entity handed here, stepping it from when it left its old server to now
+	// on the inputs the client has already sent here.
+	void _bind(int p_peer, Client &r_client, uint64_t p_id);
+	uint64_t _awaiting(const String &p_key) const;
+	void _write_entity(PlanetNet::Writer &w, uint64_t p_id, const Entity &p_entity) const;
 
 	// Persistence: see save_world().
 	String world_path;
@@ -310,6 +332,71 @@ public:
 	int get_tick() const { return int(tick); }
 	// The server's clock in ticks, including the fraction of the tick in progress.
 	double get_time_ticks() const { return double(tick) + accumulator * PlanetNet::TICK_HZ; }
+
+	// The shared clock (docs/SERVER_MESH.md): from now, the tick is the time since this wall-clock moment
+	// (Unix seconds) and poll() steps to it, so every server with the same epoch is on the same tick and a
+	// client switching between them keeps its clock. Set before clients connect.
+	void set_epoch(double p_unix_seconds);
+	double get_epoch() const { return epoch; }
+
+	// Handing entities between servers (docs/SERVER_MESH.md). Exported whole -- state, walker, combat,
+	// an enemy's input, a player's key -- with the tick they are from; imported with their ids. Imported
+	// as mirrors, they are another server's, shown to clients here and updated by further imports; as
+	// owned, they are simulated here from now on (a mirror of the same id becomes owned). A player
+	// imported owned waits for its client (await_key), and is bound to it when it arrives -- or at once,
+	// if it is already here on standby -- stepped to the present on the inputs it has sent.
+	PackedByteArray export_entities(const PackedInt64Array &p_ids) const;
+	PackedInt64Array import_entities(const PackedByteArray &p_bytes, bool p_mirror);
+	bool is_entity_mirror(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr && e->mirror;
+	}
+	// Whether the entity is a player waiting for its client (import_entities).
+	bool is_entity_awaiting(int64_t p_id) const {
+		const Entity *e = entities.getptr(uint64_t(p_id));
+		return e != nullptr && !e->await_key.is_empty();
+	}
+	// The client's player leaves this server without the client leaving: its entity is no longer the
+	// client's (export it first, then destroy it). The connection stays until the client closes it.
+	void detach_client(int p_peer);
+	// Tells a client to switch to another server (MSG_TRANSFER): it connects there on standby at once.
+	void send_transfer(int p_peer, const String &p_address, int p_port);
+	bool is_client_standby(int p_peer) const {
+		const Client *c = clients.getptr(p_peer);
+		return c != nullptr && c->standby;
+	}
+	String get_client_key(int p_peer) const {
+		const Client *c = clients.getptr(p_peer);
+		return c != nullptr ? c->player_key : String();
+	}
+	// A blow another server applied, told to the clients here that see either end (MSG_HIT): the
+	// attacker's server, when its player struck a mirror of something the other owns. `hit` is that
+	// server's `hit` signal's dictionary.
+	void relay_hit(const Dictionary &p_hit);
+	// A zone (docs/SERVER_MESH.md, portals): a space with no planet under it, only colliders, down one
+	// way. Its clients must be set the same.
+	// Which space this server runs: 0 the planet, else a zone's id. Its clients are told on welcome.
+	void set_space(int64_t p_space) { space = uint64_t(p_space); }
+	int64_t get_space() const { return int64_t(space); }
+	void set_use_terrain(bool p_use) { walker.use_terrain = p_use; }
+	bool get_use_terrain() const { return walker.use_terrain; }
+	void set_uniform_down(const Vector3 &p_down) { walker.uniform_down = p_down; }
+	Vector3 get_uniform_down() const { return walker.uniform_down; }
+	// A blow judged elsewhere (the attacker's server, against its mirror of a target owned here): applied
+	// as if struck here, the attacker's state as mirrored here (docs/SERVER_MESH.md, fighting across
+	// servers).
+	void strike(int64_t p_attacker, int64_t p_target, const Vector3 &p_at);
+
+	// One region at a time (docs/SERVER_MESH.md: a cell is a region): its persistent entities and its
+	// journal written to its file -- and, unloading, dropped from this server, when it goes to another
+	// owner or to sleep. Loading reads them back, as owned. Players are never in a region's file.
+	Error save_regions(const PackedInt32Array &p_keys, bool p_unload);
+	PackedInt64Array load_regions(const PackedInt32Array &p_keys);
+	// A world change committed by another server, near enough to matter here: journalled and sent on as
+	// if committed here (its id is kept, so it arrives once however many ways it comes).
+	void add_world_change(int64_t p_id, const Vector3 &p_point, const PackedByteArray &p_data);
+	// The regions holding the entities this server owns (not mirrors), and the entities in one region.
+	PackedInt64Array get_entities_in_region(int p_key) const;
 
 	int64_t create_entity(int p_type, const Vector3 &p_position);
 	// An enemy (docs/COMBAT.md, "The bandit"): a walker like a player's, stepped every tick from what

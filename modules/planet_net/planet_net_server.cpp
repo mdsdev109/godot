@@ -33,6 +33,7 @@
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 
 using namespace PlanetNet;
 
@@ -305,7 +306,7 @@ void PlanetNetServer::_resolve_swings() {
 		}
 		// An NPC keeps its wounds, as offline play's bandits do: healing every 5 s without a blow, a bandit
 		// fought online was back to full whenever the fight paused.
-		if (t.health_max > 0 && t.health < t.health_max && tick - t.hurt_tick > uint32_t(HEALTH_REST_TICKS) && !t.npc) {
+		if (t.health_max > 0 && t.health < t.health_max && tick - t.hurt_tick > uint32_t(HEALTH_REST_TICKS) && !t.npc && !t.mirror) {
 			t.health = t.health_max;
 			_send_health(t);
 		}
@@ -321,7 +322,7 @@ void PlanetNetServer::_resolve_swings() {
 		}
 	}
 	for (const KeyValue<uint64_t, Entity> &E : entities) {
-		if (E.value.npc) {
+		if (E.value.npc && !E.value.mirror) {
 			attackers.push_back(E.key);
 			views.push_back(tick);
 		}
@@ -375,6 +376,11 @@ void PlanetNetServer::_resolve_swings() {
 				continue;
 			}
 			a->swing_hits.push_back(T.key);
+			if (t.mirror) {
+				// Another server's: its owner judges the blow, told by the scripts over the mesh.
+				emit_signal(SNAME("mirror_struck"), int64_t(attacker), int64_t(T.key), then);
+				continue;
+			}
 			_strike(attacker, *a, T.key, t, then);
 		}
 	}
@@ -553,12 +559,40 @@ void PlanetNetServer::poll(double p_delta) {
 		}
 	}
 
+	const double dt = 1.0 / TICK_HZ;
+	if (epoch >= 0.0) {
+		// The shared clock: step to the tick the wall clock says, however poll() is called. A long hitch
+		// runs at most a quarter second of ticks and skips the rest, so every server stays on the same tick.
+		const double now = (OS::get_singleton()->get_unix_time() - epoch) * TICK_HZ;
+		const uint32_t target = uint32_t(MAX(Math::floor(now), 0.0));
+		if (target > tick + uint32_t(TICK_HZ / 4)) {
+			tick = target - uint32_t(TICK_HZ / 4);
+		}
+		while (tick < target) {
+			_step();
+		}
+		accumulator = CLAMP(now - double(tick), 0.0, 1.0) * dt;
+		return;
+	}
 	// A long hitch runs at most a quarter second of ticks rather than spiralling.
 	accumulator = MIN(accumulator + p_delta, 0.25);
-	const double dt = 1.0 / TICK_HZ;
 	while (accumulator >= dt) {
 		accumulator -= dt;
 		_step();
+	}
+}
+
+void PlanetNetServer::set_epoch(double p_unix_seconds) {
+	epoch = p_unix_seconds;
+	if (epoch >= 0.0) {
+		const double now = (OS::get_singleton()->get_unix_time() - epoch) * TICK_HZ;
+		tick = uint32_t(MAX(Math::floor(now), 0.0));
+		accumulator = 0.0;
+		for (KeyValue<uint64_t, Entity> &E : entities) {
+			for (int i = 0; i < HISTORY_TICKS; ++i) {
+				E.value.history_tick[i] = tick;
+			}
+		}
 	}
 }
 
@@ -572,6 +606,7 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 	switch (type) {
 		case MSG_HELLO: {
 			const uint16_t version = r.u16();
+			const uint8_t flags = r.u8();
 			const uint16_t key_length = r.u16();
 			CharString key_utf8;
 			key_utf8.resize_uninitialized(key_length + 1);
@@ -587,6 +622,20 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				return;
 			}
 			const String key = String::utf8(key_utf8.get_data(), key_length);
+			client->player_key = key;
+			// A player handed here from another server, or brought back by the world above: this is it.
+			const uint64_t waiting = key.is_empty() ? 0 : _awaiting(key);
+			if (waiting != 0) {
+				_bind(p_peer, *client, waiting);
+				return;
+			}
+			if ((flags & HELLO_STANDBY) != 0) {
+				// Ahead of a switch: welcomed with no entity; its inputs are kept until its player arrives.
+				client->standby = true;
+				client->welcomed = true;
+				_send_welcome(p_peer, 0);
+				return;
+			}
 			PlayerRecord *known = key.is_empty() ? nullptr : players.getptr(key);
 			if (known != nullptr && known->online) {
 				// The same player twice at once: refuse the newcomer rather than split one identity.
@@ -629,19 +678,8 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			player.health = player_health;
 			player.team = TEAM_PLAYERS;
 			client->entity = uint64_t(id);
-			client->player_key = key;
 			client->welcomed = true;
-
-			Writer w;
-			w.u8(MSG_WELCOME);
-			w.u16(PROTOCOL_VERSION);
-			w.u16(server_id);
-			w.u64(uint64_t(id));
-			w.f64(regions.radius);
-			w.u32(regions.resolution);
-			w.f64(walker.speed);
-			w.u64(moves().hash);
-			link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
+			_send_welcome(p_peer, uint64_t(id));
 			_send_health(player);
 			emit_signal(SNAME("client_connected"), p_peer, id);
 		} break;
@@ -744,6 +782,384 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 	}
 }
 
+void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity) {
+	Writer w;
+	w.u8(MSG_WELCOME);
+	w.u16(PROTOCOL_VERSION);
+	w.u16(server_id);
+	w.u64(p_entity);
+	w.f64(regions.radius);
+	w.u32(regions.resolution);
+	w.f64(walker.speed);
+	w.u64(moves().hash);
+	w.u64(space);
+	w.u8(walker.use_terrain ? 1 : 0);
+	w.f64(walker.uniform_down.x);
+	w.f64(walker.uniform_down.y);
+	w.f64(walker.uniform_down.z);
+	link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
+uint64_t PlanetNetServer::_awaiting(const String &p_key) const {
+	for (const KeyValue<uint64_t, Entity> &E : entities) {
+		if (!E.value.await_key.is_empty() && E.value.await_key == p_key) {
+			return E.key;
+		}
+	}
+	return 0;
+}
+
+void PlanetNetServer::_bind(int p_peer, Client &r_client, uint64_t p_id) {
+	Entity *e = entities.getptr(p_id);
+	ERR_FAIL_NULL(e);
+	e->await_key = String();
+	e->owner_peer = p_peer;
+	e->mirror = false;
+	e->persistent = false;
+	e->team = TEAM_PLAYERS;
+	if (e->health_max <= 0) {
+		e->health_max = player_health;
+		e->health = player_health;
+	}
+	r_client.entity = p_id;
+	r_client.welcomed = true;
+	r_client.standby = false;
+	if (!r_client.player_key.is_empty()) {
+		PlayerRecord rec;
+		rec.entity = p_id;
+		rec.state = e->state;
+		rec.online = true;
+		players[r_client.player_key] = rec;
+	}
+	// From the tick it left its old server to now, on the inputs the client sent here meanwhile: the
+	// same steps its old server and its prediction took, so the switch costs no correction.
+	const double dt = 1.0 / TICK_HZ;
+	if (e->walk_tick != 0 && e->walk_tick < tick) {
+		WalkerState st = walker_state(*e);
+		for (uint32_t k = e->walk_tick + 1; k <= tick; ++k) {
+			const WalkerInput *in = r_client.inputs.getptr(k);
+			if (in != nullptr) {
+				r_client.last_input = *in;
+				r_client.has_input = true;
+			}
+			const uint32_t *view = r_client.input_views.getptr(k);
+			if (view != nullptr) {
+				r_client.view_tick = *view;
+			}
+			r_client.inputs.erase(k);
+			r_client.input_views.erase(k);
+			st = walker.step(st, r_client.last_input, dt);
+		}
+		store_walker_state(*e, st);
+	}
+	e->walk_tick = 0;
+	r_client.last_applied_tick = tick;
+	// No past here to rewind into: where it is now.
+	for (int k = 0; k < HISTORY_TICKS; ++k) {
+		e->history[k] = e->state.position;
+		e->history_tick[k] = tick;
+	}
+	_send_welcome(p_peer, p_id);
+	_send_health(*e);
+	emit_signal(SNAME("client_connected"), p_peer, int64_t(p_id));
+}
+
+void PlanetNetServer::detach_client(int p_peer) {
+	Client *c = clients.getptr(p_peer);
+	if (c == nullptr || c->entity == 0) {
+		return;
+	}
+	Entity *e = entities.getptr(c->entity);
+	if (e != nullptr) {
+		e->owner_peer = 0;
+	}
+	if (!c->player_key.is_empty()) {
+		PlayerRecord *rec = players.getptr(c->player_key);
+		if (rec != nullptr) {
+			if (e != nullptr) {
+				rec->state = e->state;
+			}
+			rec->online = false;
+		}
+	}
+	c->entity = 0;
+	c->standby = true; // its inputs are no longer for anything here, but kept, should it come back
+}
+
+void PlanetNetServer::send_transfer(int p_peer, const String &p_address, int p_port) {
+	if (!clients.has(p_peer)) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_TRANSFER);
+	w.text(p_address);
+	w.u16(uint16_t(CLAMP(p_port, 0, 65535)));
+	link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
+}
+
+void PlanetNetServer::relay_hit(const Dictionary &p_hit) {
+	const uint64_t attacker = uint64_t(int64_t(p_hit.get("attacker", 0)));
+	const uint64_t target = uint64_t(int64_t(p_hit.get("target", 0)));
+	const Vector3 at = p_hit.get("point", Vector3());
+	Writer w;
+	w.u8(MSG_HIT);
+	w.u64(attacker);
+	w.u64(target);
+	w.u8(uint8_t(int(p_hit.get("result", 0))));
+	w.u8(uint8_t(int(p_hit.get("attack", 0))));
+	w.u16(uint16_t(CLAMP(int(p_hit.get("damage", 0)), 0, 65535)));
+	w.u16(uint16_t(CLAMP(int(p_hit.get("health", 0)), 0, 65535)));
+	w.f64(at.x);
+	w.f64(at.y);
+	w.f64(at.z);
+	w.u8(uint8_t(int(p_hit.get("reaction", 0))));
+	for (KeyValue<int, Client> &C : clients) {
+		const Client &c = C.value;
+		if (!c.welcomed) {
+			continue;
+		}
+		const View *seen_target = c.views.getptr(target);
+		const View *seen_attacker = c.views.getptr(attacker);
+		if (c.entity == attacker || c.entity == target || (seen_target != nullptr && !seen_target->removing) ||
+				(seen_attacker != nullptr && !seen_attacker->removing)) {
+			link.send(C.key, CHANNEL_CONTROL, w.data(), true);
+		}
+	}
+}
+
+void PlanetNetServer::strike(int64_t p_attacker, int64_t p_target, const Vector3 &p_at) {
+	Entity *a = entities.getptr(uint64_t(p_attacker));
+	Entity *t = entities.getptr(uint64_t(p_target));
+	if (a == nullptr || t == nullptr || t->mirror || t->health_max <= 0) {
+		return;
+	}
+	_strike(uint64_t(p_attacker), *a, uint64_t(p_target), *t, p_at);
+}
+
+namespace {
+constexpr uint32_t MAGIC_EXPORT = 0x58454e50; // "PNEX"
+enum ExportFlags : uint8_t {
+	EXPORT_WALKER = 1,
+	EXPORT_NPC = 2,
+	EXPORT_PERSISTENT = 4,
+	EXPORT_PLAYER = 8,
+};
+} // namespace
+
+void PlanetNetServer::_write_entity(Writer &w, uint64_t p_id, const Entity &p_entity) const {
+	const EntityState &s = p_entity.state;
+	w.u64(p_id);
+	w.u16(s.type);
+	w.u64(s.frame);
+	w.f64(double(s.position.x));
+	w.f64(double(s.position.y));
+	w.f64(double(s.position.z));
+	w.f64(double(s.rotation.x));
+	w.f64(double(s.rotation.y));
+	w.f64(double(s.rotation.z));
+	w.f64(double(s.rotation.w));
+	w.f64(double(s.velocity.x));
+	w.f64(double(s.velocity.y));
+	w.f64(double(s.velocity.z));
+	w.u16(s.pose);
+	w.u64(s.look);
+	const bool player = s.type == ENTITY_TYPE_PLAYER;
+	const uint8_t flags = (has_walker(p_entity) ? EXPORT_WALKER : 0) | (p_entity.npc ? EXPORT_NPC : 0) |
+			(p_entity.persistent ? EXPORT_PERSISTENT : 0) | (player ? EXPORT_PLAYER : 0);
+	w.u8(flags);
+	w.u8(p_entity.team);
+	w.u32(uint32_t(p_entity.health));
+	w.u32(uint32_t(p_entity.health_max));
+	w.u8(p_entity.awareness);
+	if (flags & EXPORT_WALKER) {
+		write_walk(w, p_entity.walk);
+	}
+	if (flags & EXPORT_NPC) {
+		const WalkerInput &in = p_entity.npc_input;
+		w.f32(in.move.x);
+		w.f32(in.move.y);
+		w.f32(in.yaw);
+		w.u16(in.buttons);
+		w.u8(in.abilities);
+		w.f32(float(in.aim.x));
+		w.f32(float(in.aim.y));
+		w.f32(float(in.aim.z));
+	}
+	if (flags & EXPORT_PLAYER) {
+		String key = p_entity.await_key;
+		if (key.is_empty()) {
+			const Client *c = clients.getptr(p_entity.owner_peer);
+			if (c != nullptr) {
+				key = c->player_key;
+			}
+		}
+		w.text(key);
+	}
+}
+
+PackedByteArray PlanetNetServer::export_entities(const PackedInt64Array &p_ids) const {
+	Writer w;
+	w.u32(MAGIC_EXPORT);
+	w.u32(tick);
+	const uint32_t count_at = w.size();
+	w.u32(0);
+	uint32_t n = 0;
+	for (int i = 0; i < p_ids.size(); ++i) {
+		const Entity *e = entities.getptr(uint64_t(p_ids[i]));
+		if (e != nullptr) {
+			_write_entity(w, uint64_t(p_ids[i]), *e);
+			++n;
+		}
+	}
+	// The count, in place.
+	PackedByteArray out;
+	out.resize(w.size());
+	memcpy(out.ptrw(), w.data().ptr(), w.size());
+	memcpy(out.ptrw() + count_at, &n, 4);
+	return out;
+}
+
+PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes, bool p_mirror) {
+	PackedInt64Array out;
+	Reader r(p_bytes.ptr(), uint32_t(p_bytes.size()));
+	if (r.u32() != MAGIC_EXPORT) {
+		ERR_FAIL_V_MSG(out, "Not an entity export.");
+	}
+	const uint32_t from_tick = r.u32();
+	const uint32_t n = r.u32();
+	const double dt = 1.0 / TICK_HZ;
+	for (uint32_t i = 0; i < n && r.ok(); ++i) {
+		EntityState s;
+		s.id = r.u64();
+		s.type = r.u16();
+		s.frame = r.u64();
+		s.position.x = r.f64();
+		s.position.y = r.f64();
+		s.position.z = r.f64();
+		s.rotation.x = r.f64();
+		s.rotation.y = r.f64();
+		s.rotation.z = r.f64();
+		s.rotation.w = r.f64();
+		s.velocity.x = r.f64();
+		s.velocity.y = r.f64();
+		s.velocity.z = r.f64();
+		s.pose = r.u16();
+		s.look = r.u64();
+		const uint8_t flags = r.u8();
+		const uint8_t team = r.u8();
+		const int32_t health = int32_t(r.u32());
+		const int32_t health_max = int32_t(r.u32());
+		const uint8_t awareness = r.u8();
+		WalkerState walk;
+		if (flags & EXPORT_WALKER) {
+			read_walk(r, walk);
+		}
+		WalkerInput npc_in;
+		if (flags & EXPORT_NPC) {
+			npc_in.move.x = r.f32();
+			npc_in.move.y = r.f32();
+			npc_in.yaw = r.f32();
+			npc_in.buttons = r.u16();
+			npc_in.abilities = r.u8();
+			npc_in.aim.x = r.f32();
+			npc_in.aim.y = r.f32();
+			npc_in.aim.z = r.f32();
+		}
+		String key;
+		if (flags & EXPORT_PLAYER) {
+			key = r.text();
+		}
+		if (!r.ok()) {
+			break;
+		}
+		Entity *e = entities.getptr(s.id);
+		if (e != nullptr && !e->mirror) {
+			continue; // ours already: another server's word does not move it
+		}
+		if (e == nullptr) {
+			if (_create_with_id(s.id, s.type, s.position) == 0) {
+				continue;
+			}
+			e = entities.getptr(s.id);
+			e->mirror = true; // until it is made ours below
+		}
+		e->state = s;
+		e->walk = walk;
+		e->walk.position = s.position;
+		e->walk.velocity = s.velocity;
+		e->walk.rotation = s.rotation;
+		e->team = team;
+		e->health = health;
+		e->health_max = health_max;
+		e->awareness = awareness;
+		e->npc_input = npc_in;
+		if (p_mirror) {
+			e->mirror = true;
+			e->npc = false;
+			e->persistent = false;
+			e->owner_peer = 0;
+		} else {
+			e->mirror = false;
+			e->npc = (flags & EXPORT_NPC) != 0;
+			e->persistent = (flags & EXPORT_PERSISTENT) != 0;
+			e->walk_tick = from_tick;
+			if (e->npc && from_tick < tick) {
+				// Stepped on to now, on the input its brain last gave it.
+				WalkerState st = walker_state(*e);
+				for (uint32_t k = from_tick; k < tick; ++k) {
+					st = walker.step(st, e->npc_input, dt);
+				}
+				store_walker_state(*e, st);
+				e->walk_tick = 0;
+			}
+			if (flags & EXPORT_PLAYER) {
+				e->await_key = key;
+				e->owner_peer = 0;
+				// Its client may be here already, on standby.
+				for (KeyValue<int, Client> &C : clients) {
+					if (C.value.entity == 0 && !key.is_empty() && C.value.player_key == key) {
+						_bind(C.key, C.value, s.id);
+						break;
+					}
+				}
+			}
+		}
+		out.push_back(int64_t(s.id));
+	}
+	return out;
+}
+
+PackedInt64Array PlanetNetServer::get_entities_in_region(int p_key) const {
+	PackedInt64Array out;
+	const LocalVector<uint64_t> *ids = region_index.getptr(uint32_t(p_key));
+	if (ids != nullptr) {
+		for (const uint64_t id : *ids) {
+			out.push_back(int64_t(id));
+		}
+	}
+	return out;
+}
+
+void PlanetNetServer::add_world_change(int64_t p_id, const Vector3 &p_point, const PackedByteArray &p_data) {
+	const uint32_t key = regions.key_of(p_point);
+	LocalVector<WorldChange> &changes = journal[key];
+	for (const WorldChange &c : changes) {
+		if (c.id == uint64_t(p_id)) {
+			return;
+		}
+	}
+	WorldChange change;
+	change.id = uint64_t(p_id);
+	change.point = p_point;
+	change.data = p_data;
+	changes.push_back(change);
+	for (KeyValue<int, Client> &C : clients) {
+		if (C.value.welcomed && C.value.journal_regions.has(key)) {
+			_send_change(C.key, change);
+		}
+	}
+}
+
 void PlanetNetServer::_acknowledge(Client &r_client, uint32_t p_seq) {
 	SentRecord &rec = r_client.sent[p_seq % SENT_RECORDS];
 	if (!rec.valid || rec.seq != p_seq) {
@@ -792,6 +1208,11 @@ void PlanetNetServer::_step() {
 		Client &client = C.value;
 		Entity *e = client.entity != 0 ? entities.getptr(client.entity) : nullptr;
 		if (e == nullptr) {
+			// On standby: its inputs kept a couple of seconds back, for when its player arrives.
+			if (tick > uint32_t(2 * TICK_HZ)) {
+				client.inputs.erase(tick - uint32_t(2 * TICK_HZ));
+				client.input_views.erase(tick - uint32_t(2 * TICK_HZ));
+			}
 			continue;
 		}
 		const WalkerInput *arrived = client.inputs.getptr(tick);
@@ -831,7 +1252,7 @@ void PlanetNetServer::_step() {
 	// Enemies: walkers stepped from what their brains set (set_entity_input).
 	for (KeyValue<uint64_t, Entity> &E : entities) {
 		Entity &e = E.value;
-		if (!e.npc) {
+		if (!e.npc || e.mirror) {
 			continue;
 		}
 		walker.body_feet.clear();
@@ -1114,7 +1535,8 @@ void PlanetNetServer::_send_change(int p_peer, const WorldChange &p_change) {
 int64_t PlanetNetServer::commit_world_change(const Vector3 &p_point, const PackedByteArray &p_data) {
 	ERR_FAIL_COND_V_MSG(p_data.size() > 0xffff, 0, "A world change is at most 65535 bytes.");
 	WorldChange change;
-	change.id = next_change++;
+	// Carrying this server's id, as entity ids do, so changes from several servers never collide.
+	change.id = (uint64_t(server_id) << ENTITY_SERVER_SHIFT) | next_change++;
 	change.point = p_point;
 	change.data = p_data;
 	const uint32_t key = regions.key_of(p_point);
@@ -1412,7 +1834,9 @@ Error PlanetNetServer::load_world() {
 					}
 					for (const WorldChange &c : changes) {
 						journal[regions.key_of(c.point)].push_back(c);
-						next_change = MAX(next_change, c.id + 1);
+						if ((c.id >> ENTITY_SERVER_SHIFT) == server_id || (c.id >> ENTITY_SERVER_SHIFT) == 0) {
+							next_change = MAX(next_change, (c.id & ((uint64_t(1) << ENTITY_SERVER_SHIFT) - 1)) + 1);
+						}
 						++change_count;
 					}
 					++region_count;
@@ -1467,6 +1891,131 @@ Error PlanetNetServer::load_world() {
 	last_load_report["world_changes"] = change_count;
 	last_load_report["skipped"] = skipped;
 	return result;
+}
+
+Error PlanetNetServer::save_regions(const PackedInt32Array &p_keys, bool p_unload) {
+	ERR_FAIL_COND_V_MSG(world_path.is_empty(), ERR_UNCONFIGURED, "Set world_path before saving.");
+	Error err = DirAccess::make_dir_recursive_absolute(world_path);
+	if (err != OK && err != ERR_ALREADY_EXISTS) {
+		return err;
+	}
+	err = OK;
+	for (int i = 0; i < p_keys.size(); ++i) {
+		const uint32_t key = uint32_t(p_keys[i]);
+		LocalVector<uint64_t> ids;
+		const LocalVector<uint64_t> *in_region = region_index.getptr(key);
+		if (in_region != nullptr) {
+			for (const uint64_t id : *in_region) {
+				const Entity &e = entities[id];
+				if (e.persistent && !e.mirror && e.state.type != ENTITY_TYPE_PLAYER) {
+					ids.push_back(id);
+				}
+			}
+		}
+		const LocalVector<WorldChange> *changes = journal.getptr(key);
+		if (ids.is_empty() && (changes == nullptr || changes->is_empty())) {
+			if (saved_regions.has(key) || FileAccess::exists(world_path.path_join(region_file(key)))) {
+				DirAccess::remove_absolute(world_path.path_join(region_file(key)));
+			}
+			saved_regions.erase(key);
+		} else {
+			Writer w;
+			w.u32(MAGIC_REGION);
+			w.u16(FILE_FORMAT);
+			w.u32(key);
+			w.u32(ids.size());
+			for (const uint64_t id : ids) {
+				const Entity &e = entities[id];
+				w.u64(id);
+				w.u16(e.state.type);
+				w.u64(e.state.frame);
+				write_state(w, e.state);
+			}
+			w.u32(changes != nullptr ? changes->size() : 0);
+			if (changes != nullptr) {
+				for (const WorldChange &c : *changes) {
+					w.u64(c.id);
+					w.f64(double(c.point.x));
+					w.f64(double(c.point.y));
+					w.f64(double(c.point.z));
+					w.u16(uint16_t(c.data.size()));
+					for (int k = 0; k < c.data.size(); ++k) {
+						w.u8(c.data[k]);
+					}
+				}
+			}
+			const Error e = _write_file(region_file(key), w);
+			err = err == OK ? e : err;
+			saved_regions.insert(key);
+		}
+		if (p_unload) {
+			for (const uint64_t id : ids) {
+				destroy_entity(int64_t(id));
+			}
+			journal.erase(key);
+			saved_regions.erase(key);
+			for (KeyValue<int, Client> &C : clients) {
+				C.value.journal_regions.erase(key);
+			}
+		}
+	}
+	return err;
+}
+
+PackedInt64Array PlanetNetServer::load_regions(const PackedInt32Array &p_keys) {
+	PackedInt64Array out;
+	LocalVector<uint8_t> bytes;
+	for (int i = 0; i < p_keys.size(); ++i) {
+		const uint32_t key = uint32_t(p_keys[i]);
+		if (_read_file(region_file(key), MAGIC_REGION, bytes) != OK) {
+			continue;
+		}
+		saved_regions.insert(key);
+		Reader r(bytes.ptr(), bytes.size());
+		r.u32();
+		const uint32_t n = r.u32();
+		for (uint32_t k = 0; k < n && r.ok(); ++k) {
+			EntityState st;
+			st.id = r.u64();
+			st.type = r.u16();
+			st.frame = r.u64();
+			read_state(r, st);
+			if (!r.ok()) {
+				break;
+			}
+			Entity *e = entities.getptr(st.id);
+			if (e != nullptr && !e->mirror) {
+				continue;
+			}
+			if (e == nullptr) {
+				if (_create_with_id(st.id, st.type, st.position) == 0) {
+					continue;
+				}
+				e = entities.getptr(st.id);
+			}
+			e->state = st;
+			e->mirror = false;
+			e->persistent = true;
+			out.push_back(int64_t(st.id));
+		}
+		const uint32_t nc = r.u32();
+		for (uint32_t k = 0; k < nc && r.ok(); ++k) {
+			WorldChange c;
+			c.id = r.u64();
+			c.point.x = r.f64();
+			c.point.y = r.f64();
+			c.point.z = r.f64();
+			const uint16_t len = r.u16();
+			c.data.resize(len);
+			for (uint16_t b = 0; b < len; ++b) {
+				c.data.write[b] = r.u8();
+			}
+			if (r.ok()) {
+				add_world_change(int64_t(c.id), c.point, c.data);
+			}
+		}
+	}
+	return out;
 }
 
 void PlanetNetServer::set_entity_persistent(int64_t p_id, bool p_persistent) {
@@ -1610,6 +2159,29 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("send_message", "peer", "channel", "text"), &PlanetNetServer::send_message);
 	ClassDB::bind_method(D_METHOD("broadcast_message", "channel", "text"), &PlanetNetServer::broadcast_message);
 	ClassDB::bind_method(D_METHOD("get_entity_peer", "id"), &PlanetNetServer::get_entity_peer);
+	ClassDB::bind_method(D_METHOD("set_epoch", "unix_seconds"), &PlanetNetServer::set_epoch);
+	ClassDB::bind_method(D_METHOD("get_epoch"), &PlanetNetServer::get_epoch);
+	ClassDB::bind_method(D_METHOD("export_entities", "ids"), &PlanetNetServer::export_entities);
+	ClassDB::bind_method(D_METHOD("import_entities", "bytes", "mirror"), &PlanetNetServer::import_entities);
+	ClassDB::bind_method(D_METHOD("is_entity_mirror", "id"), &PlanetNetServer::is_entity_mirror);
+	ClassDB::bind_method(D_METHOD("is_entity_awaiting", "id"), &PlanetNetServer::is_entity_awaiting);
+	ClassDB::bind_method(D_METHOD("detach_client", "peer"), &PlanetNetServer::detach_client);
+	ClassDB::bind_method(D_METHOD("send_transfer", "peer", "address", "port"), &PlanetNetServer::send_transfer);
+	ClassDB::bind_method(D_METHOD("is_client_standby", "peer"), &PlanetNetServer::is_client_standby);
+	ClassDB::bind_method(D_METHOD("get_client_key", "peer"), &PlanetNetServer::get_client_key);
+	ClassDB::bind_method(D_METHOD("strike", "attacker", "target", "at"), &PlanetNetServer::strike);
+	ClassDB::bind_method(D_METHOD("relay_hit", "hit"), &PlanetNetServer::relay_hit);
+	ClassDB::bind_method(D_METHOD("set_space", "space"), &PlanetNetServer::set_space);
+	ClassDB::bind_method(D_METHOD("get_space"), &PlanetNetServer::get_space);
+	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetNetServer::set_use_terrain);
+	ClassDB::bind_method(D_METHOD("get_use_terrain"), &PlanetNetServer::get_use_terrain);
+	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetNetServer::set_uniform_down);
+	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetNetServer::get_uniform_down);
+	ClassDB::bind_method(D_METHOD("save_regions", "keys", "unload"), &PlanetNetServer::save_regions);
+	ClassDB::bind_method(D_METHOD("load_regions", "keys"), &PlanetNetServer::load_regions);
+	ClassDB::bind_method(D_METHOD("add_world_change", "id", "point", "data"), &PlanetNetServer::add_world_change);
+	ClassDB::bind_method(D_METHOD("get_entities_in_region", "key"), &PlanetNetServer::get_entities_in_region);
+	ADD_SIGNAL(MethodInfo("mirror_struck", PropertyInfo(Variant::INT, "attacker"), PropertyInfo(Variant::INT, "target"), PropertyInfo(Variant::VECTOR3, "at")));
 	ADD_SIGNAL(MethodInfo("command_received", PropertyInfo(Variant::INT, "peer"), PropertyInfo(Variant::INT, "entity_id"), PropertyInfo(Variant::STRING, "line")));
 	BIND_CONSTANT(MESSAGE_INFO);
 	BIND_CONSTANT(MESSAGE_ERROR);
