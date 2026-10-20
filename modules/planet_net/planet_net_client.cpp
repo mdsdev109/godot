@@ -164,6 +164,7 @@ void PlanetNetClient::poll(double p_delta) {
 	if (!link.is_open()) {
 		return;
 	}
+	frame_ahead_ticks = 0.0; // the simulation reads its own clock
 	clock += p_delta;
 
 	LocalVector<PlanetNetLink::Event> events;
@@ -266,35 +267,51 @@ void PlanetNetClient::_advance_prediction(double p_delta) {
 	while (frames.size() > PREDICTION_FRAMES) {
 		frames.remove_at(0);
 	}
-	// How far past the newest predicted tick this frame is, for drawing the player between ticks.
-	display_alpha = CLAMP(target - double(predicted_tick), 0.0, 1.0);
+	// Where the prediction's clock is, for drawing the player between ticks.
+	display_target = target;
 }
 
-// The player as drawn this frame: between the last two predicted ticks by how far into the next one the
-// clock is -- a tick behind the newest, as offline play draws its walker (PlayerRig.tick_fraction). Drawn
-// at the newest tick itself, a 30 Hz walker on a 60 Hz screen stood still one frame and jumped two ticks'
-// worth the next: a steady judder that looked like rubberbanding though nothing was corrected.
-const PlanetNetClient::Frame *PlanetNetClient::_frame_before() const {
-	if (frames.size() < 2 || frames[frames.size() - 1].tick != predicted_tick || frames[frames.size() - 2].tick + 1 != predicted_tick) {
-		return nullptr;
+// The player as drawn: at the prediction's clock as of this frame (the last poll's, and how far past it the
+// frame is: set_frame_ahead), less DISPLAY_LAG_TICKS, between the predicted ticks either side of that.
+// Drawn at the newest tick itself, a 30 Hz walker on a 60 Hz screen stood still one frame and jumped two
+// ticks' worth the next. The lag is a tick and a half, not offline's one: the prediction's clock is not in
+// step with the physics steps that poll it, so half a tick more keeps the frame's moment between ticks
+// already predicted, never clamped at the newest.
+bool PlanetNetClient::_display_pair(const Frame *&r_before, const Frame *&r_after, double &r_t) const {
+	if (frames.size() < 2 || frames[frames.size() - 1].tick != predicted_tick) {
+		return false;
 	}
-	return &frames[frames.size() - 2];
+	const double d = display_target + frame_ahead_ticks - DISPLAY_LAG_TICKS;
+	const double base = Math::floor(d);
+	const int64_t back = int64_t(predicted_tick) - int64_t(base); // how many frames back the earlier one is
+	const int64_t i = int64_t(frames.size()) - 1 - back;
+	if (back < 1 || i < 0 || frames[i].tick + 1 != frames[i + 1].tick) {
+		return false;
+	}
+	r_before = &frames[i];
+	r_after = &frames[i + 1];
+	r_t = CLAMP(d - base, 0.0, 1.0);
+	return true;
 }
 
 Vector3 PlanetNetClient::get_predicted_display_position() const {
-	const Frame *before = _frame_before();
-	if (before == nullptr) {
+	const Frame *before = nullptr;
+	const Frame *after = nullptr;
+	double t = 0.0;
+	if (!_display_pair(before, after, t)) {
 		return predicted.position + smoothing;
 	}
-	return before->state.position.lerp(predicted.position, display_alpha) + smoothing;
+	return before->state.position.lerp(after->state.position, t) + smoothing;
 }
 
 Quaternion PlanetNetClient::get_predicted_display_rotation() const {
-	const Frame *before = _frame_before();
-	if (before == nullptr) {
+	const Frame *before = nullptr;
+	const Frame *after = nullptr;
+	double t = 0.0;
+	if (!_display_pair(before, after, t)) {
 		return predicted.rotation;
 	}
-	return before->state.rotation.slerp(predicted.rotation, display_alpha);
+	return before->state.rotation.slerp(after->state.rotation, t);
 }
 
 void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
@@ -870,6 +887,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_predicted_position"), &PlanetNetClient::get_predicted_position);
 	ClassDB::bind_method(D_METHOD("get_predicted_rotation"), &PlanetNetClient::get_predicted_rotation);
 	ClassDB::bind_method(D_METHOD("get_predicted_display_position"), &PlanetNetClient::get_predicted_display_position);
+	ClassDB::bind_method(D_METHOD("set_frame_ahead", "seconds"), &PlanetNetClient::set_frame_ahead);
 	ClassDB::bind_method(D_METHOD("get_predicted_display_rotation"), &PlanetNetClient::get_predicted_display_rotation);
 	ClassDB::bind_method(D_METHOD("get_predicted_reference"), &PlanetNetClient::get_predicted_reference);
 	ClassDB::bind_method(D_METHOD("get_predicted_position_at", "tick"), &PlanetNetClient::get_predicted_position_at);

@@ -83,8 +83,10 @@ private:
 		PlanetNet::WalkerState state; // after applying input
 		uint32_t view = 0; // the tick others were being drawn at when the input was chosen
 	};
-	// The frame a tick before the newest predicted one, or null (none yet, or just reset).
-	const Frame *_frame_before() const;
+	// The two predicted frames either side of the drawn moment and the place between them (false: none
+	// yet, or just reset -- draw the newest).
+	bool _display_pair(const Frame *&r_before, const Frame *&r_after, double &r_t) const;
+	static constexpr double DISPLAY_LAG_TICKS = 1.5;
 
 	PlanetNetLink link;
 	int server_peer = 0;
@@ -148,7 +150,8 @@ private:
 	bool teleport_restart = false;
 	uint32_t last_confirmed_tick = 0;
 	Vector3 smoothing; // visual offset left by the last corrections, decaying to zero
-	double display_alpha = 1.0; // this frame's place between the newest predicted tick and the next, 0..1
+	double display_target = 0.0; // the prediction's clock at the last poll (ticks, fractional)
+	double frame_ahead_ticks = 0.0; // set_frame_ahead
 	uint64_t prediction_compared = 0;
 	uint64_t prediction_exact = 0;
 	uint64_t prediction_corrections = 0;
@@ -217,7 +220,12 @@ public:
 
 	int64_t get_local_entity_id() const { return int64_t(local_entity); }
 	double get_server_time_estimate() const { return server_time; }
-	double get_render_time() const { return server_time - interpolation_delay_ticks; }
+	double get_render_time() const { return server_time - interpolation_delay_ticks + frame_ahead_ticks; }
+	// Drawing: how far past the last poll this frame is drawn (seconds; the game's physics interpolation
+	// fraction of a step), so what is drawn -- the player between its predicted ticks, others between
+	// their states -- is where it is at the frame's moment, every frame, not at the last step's. poll()
+	// sets it back to 0: the simulation reads its own clock.
+	void set_frame_ahead(double p_seconds) { frame_ahead_ticks = MAX(p_seconds, 0.0) * PlanetNet::TICK_HZ; }
 	double get_rtt_ms() const { return last_rtt * 1000.0; }
 	void set_interpolation_delay_ms(double p_ms) { interpolation_delay_ticks = p_ms * 0.001 * PlanetNet::TICK_HZ; }
 	double get_interpolation_delay_ms() const { return interpolation_delay_ticks * 1000.0 / PlanetNet::TICK_HZ; }
