@@ -270,9 +270,6 @@ struct Walker {
 	// Crouched: a sneak, 2 m/s (the crouch walk's own pace, as BotW's sneak is about a walk's).
 	double crouch_speed = 2.0;
 	double fly_speed = 30.0; // a DM's flight (FLAG_NOCLIP), m/s
-	// A DM flown by its free camera (planet-demo net/build/free_cam.gd): the input's aim is its velocity, no
-	// faster than this.
-	double fly_speed_max = 600.0;
 	// A blow in the back: a weapon's blow from within back_arc degrees of straight behind its target lands
 	// back_multiplier times its damage and knocks it down, whatever its poise or armour -- positional, as
 	// Dark Souls' backstab is, not by whether the target noticed (which no one can judge of a player in
@@ -1010,12 +1007,12 @@ struct Walker {
 		}
 		if (p_state.flags & FLAG_NOCLIP) {
 			// A DM's flight. Flown by its free camera, the input's aim is the velocity itself (a DM casts
-			// nothing, so the aim is free): along the view, at the camera's speed. Otherwise straight where
-			// it is steered, up by jump, down by let-go, sprint four times faster.
+			// nothing, so the aim is free): along the view, at the camera's speed, with no limit -- a DM
+			// crosses a planet, or leaves it. Otherwise straight where it is steered, up by jump, down by
+			// let-go, sprint four times faster.
 			WalkerState out = p_state;
-			const Vector3 flown = Vector3(p_input.aim);
-			if (flown.length_squared() > 0.0) {
-				out.velocity = flown.length() > fly_speed_max ? flown.normalized() * fly_speed_max : flown;
+			if (p_input.aim.length_squared() > 0.0) {
+				out.velocity = p_input.aim;
 			} else {
 				Vector3 fly = forward * my + right * mx + up * (((p_input.buttons & BUTTON_JUMP) ? 1.0 : 0.0) - ((p_input.buttons & BUTTON_DROP) ? 1.0 : 0.0));
 				if (fly.length_squared() > 1.0) {
