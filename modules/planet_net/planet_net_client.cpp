@@ -142,6 +142,9 @@ void PlanetNetClient::_poll_standby() {
 				const uint64_t entity = r.u64();
 				r.f64(); // region radius
 				r.u32(); // regions per edge
+				// The welcome's layout is MSG_WELCOME's (the case below): a field missing here reads every
+				// one after it wrong -- the volume cell (protocol 21) once did, and switches were corrected.
+				const double volume_cell = r.f64();
 				r.f64(); // walk speed
 				r.u64(); // move hash
 				if (entity != 0) {
@@ -156,6 +159,7 @@ void PlanetNetClient::_poll_standby() {
 				if (entity == 0) {
 					standby_ready = true;
 				} else {
+					regions.volume_cell = volume_cell;
 					_promote(sid, entity);
 					return;
 				}
@@ -659,6 +663,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const uint64_t entity = r.u64();
 			const double region_radius = r.f64();
 			const uint32_t region_resolution = r.u32();
+			const double region_volume_cell = r.f64();
 			const double walk_speed = r.f64();
 			const uint64_t move_hash = r.u64();
 			_read_space(r);
@@ -679,6 +684,7 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			local_entity = entity;
 			regions.radius = region_radius;
 			regions.resolution = region_resolution;
+			regions.volume_cell = region_volume_cell;
 			walker.radius = region_radius;
 			walker.speed = walk_speed;
 			welcomed = true;

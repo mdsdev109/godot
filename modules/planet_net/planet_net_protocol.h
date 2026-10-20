@@ -60,7 +60,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 20;
+constexpr uint16_t PROTOCOL_VERSION = 21;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u8 flags (HelloFlags), u16 n, n bytes of player key
@@ -150,11 +150,20 @@ struct EntityState {
 // Regions are cells of a coarse cube-sphere grid: `resolution` cells along each face edge. A key is
 // face (3 bits) | i (14 bits) | j (14 bits). Everything here goes through PlanetLattice, which is
 // bit-identical on every machine, so a key and its centre mean the same thing to server and client.
+// The unit of ownership and interest. On a planet's surface, a lattice cell of the cube sphere. In volume
+// mode (volume_cell > 0) -- every zone that is not a planet's surface: a system's space, a bridge, an
+// interior (planet-demo docs/SYSTEM_WORLD.md, "Everything is a zone") -- a cube of that edge in a 3D grid
+// centred on the origin, 1024 cells a side, keyed with the top bit set so no key is ever both.
 struct Regions {
 	double radius = 150000.0;
 	uint32_t resolution = 1;
+	double volume_cell = 0.0;
 
 	static constexpr uint32_t MAX_RESOLUTION = (1u << 14) - 1;
+	static constexpr int VOLUME_SIDE = 1024;
+	static constexpr uint32_t VOLUME_FLAG = 1u << 31;
+
+	bool is_volume() const { return volume_cell > 0.0; }
 
 	void configure(double p_radius, double p_region_size) {
 		radius = p_radius;
@@ -164,6 +173,13 @@ struct Regions {
 	}
 
 	uint32_t key_of(const Vector3 &p_position) const {
+		if (is_volume()) {
+			const int half = VOLUME_SIDE / 2;
+			const int i = CLAMP(int(Math::floor(p_position.x / volume_cell)) + half, 0, VOLUME_SIDE - 1);
+			const int j = CLAMP(int(Math::floor(p_position.y / volume_cell)) + half, 0, VOLUME_SIDE - 1);
+			const int k = CLAMP(int(Math::floor(p_position.z / volume_cell)) + half, 0, VOLUME_SIDE - 1);
+			return VOLUME_FLAG | (uint32_t(i) << 20) | (uint32_t(j) << 10) | uint32_t(k);
+		}
 		int face = 0;
 		double s = 0.0;
 		double t = 0.0;
@@ -174,6 +190,13 @@ struct Regions {
 	}
 
 	Vector3 centre(uint32_t p_key) const {
+		if (p_key & VOLUME_FLAG) {
+			const int half = VOLUME_SIDE / 2;
+			const int i = int((p_key >> 20) & 1023u) - half;
+			const int j = int((p_key >> 10) & 1023u) - half;
+			const int k = int(p_key & 1023u) - half;
+			return Vector3(double(i) + 0.5, double(j) + 0.5, double(k) + 0.5) * volume_cell;
+		}
 		const int face = int(p_key >> 28);
 		const uint32_t i = (p_key >> 14) & MAX_RESOLUTION;
 		const uint32_t j = p_key & MAX_RESOLUTION;
@@ -183,7 +206,7 @@ struct Regions {
 	}
 
 	// Approximate edge length of a region in metres, for sizing searches.
-	double cell_size() const { return radius * Math::PI * 0.5 / double(resolution); }
+	double cell_size() const { return is_volume() ? volume_cell : radius * Math::PI * 0.5 / double(resolution); }
 };
 
 // ---------------------------------------------------------------- compact encodings

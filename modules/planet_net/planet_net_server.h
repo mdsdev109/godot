@@ -551,6 +551,10 @@ public:
 	Vector3 get_entity_position_at(int64_t p_id, double p_tick) const;
 	int get_entity_owner(int64_t p_id) const;
 	int get_region_of(const Vector3 &p_position) const { return int(regions.key_of(p_position)); }
+	Vector3 get_region_centre(int p_key) const { return regions.centre(uint32_t(p_key)); }
+	// Volume mode (PlanetNet::Regions): every zone that is not a planet's surface. 0 is the surface's.
+	void set_volume_cell(double p_size) { regions.volume_cell = MAX(p_size, 0.0); }
+	double get_volume_cell() const { return regions.volume_cell; }
 	int64_t get_client_entity(int p_peer) const;
 	PackedInt32Array get_client_peers() const;
 	// Entities the client is currently told about (not counting ones being removed).

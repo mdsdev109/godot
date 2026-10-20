@@ -798,6 +798,7 @@ void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity) {
 	w.u64(p_entity);
 	w.f64(regions.radius);
 	w.u32(regions.resolution);
+	w.f64(regions.volume_cell);
 	w.f64(walker.speed);
 	w.u64(moves().hash);
 	w.u64(space);
@@ -1298,6 +1299,23 @@ void PlanetNetServer::_step() {
 void PlanetNetServer::_interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const {
 	// Sample the tangent disk at half a region's spacing and collect the regions the samples land
 	// in. Works across cube faces with no special cases, because every sample is simply mapped.
+	if (regions.is_volume()) {
+		// A zone in volume mode: the ball round the centre, sampled the same way.
+		const double step = regions.cell_size() * 0.5;
+		const double reach = interest_radius + regions.cell_size();
+		const int n = int(Math::ceil(reach / step));
+		const double limit = (reach / step) * (reach / step) + 1.0;
+		for (int a = -n; a <= n; ++a) {
+			for (int b = -n; b <= n; ++b) {
+				for (int c = -n; c <= n; ++c) {
+					if (double(a * a + b * b + c * c) <= limit) {
+						r_regions.insert(regions.key_of(p_centre + Vector3(double(a), double(b), double(c)) * step));
+					}
+				}
+			}
+		}
+		return;
+	}
 	const Vector3 up = p_centre.normalized();
 	Vector3 north = Vector3(0, 1, 0) - up * up.y;
 	if (north.length_squared() < 1e-12) {
@@ -2127,6 +2145,9 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_position_at", "id", "tick"), &PlanetNetServer::get_entity_position_at);
 	ClassDB::bind_method(D_METHOD("get_entity_owner", "id"), &PlanetNetServer::get_entity_owner);
 	ClassDB::bind_method(D_METHOD("get_region_of", "position"), &PlanetNetServer::get_region_of);
+	ClassDB::bind_method(D_METHOD("get_region_centre", "key"), &PlanetNetServer::get_region_centre);
+	ClassDB::bind_method(D_METHOD("set_volume_cell", "size"), &PlanetNetServer::set_volume_cell);
+	ClassDB::bind_method(D_METHOD("get_volume_cell"), &PlanetNetServer::get_volume_cell);
 	ClassDB::bind_method(D_METHOD("get_client_entity", "peer"), &PlanetNetServer::get_client_entity);
 	ClassDB::bind_method(D_METHOD("get_client_peers"), &PlanetNetServer::get_client_peers);
 	ClassDB::bind_method(D_METHOD("get_client_view", "peer"), &PlanetNetServer::get_client_view);
