@@ -214,6 +214,8 @@ Error PacketPeerUDP::connect_shared_socket(Ref<NetSocket> p_sock, IPAddress p_ip
 	peer_port = p_port;
 	packet_ip = peer_addr;
 	packet_port = peer_port;
+	// planet: a server's peer (DTLS over UDPServer) gets the receive ring a bound socket gets, 1 MB, not 64 KB.
+	rb.resize(20);
 	return OK;
 }
 

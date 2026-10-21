@@ -197,7 +197,9 @@ public:
 		bound = true;
 		local_address = p_ip;
 		local_port = p_port;
-		return udp->bind(p_port, p_ip);
+		// planet: a 1 MB receive ring, not 128 KB -- a reliable burst (an AutoDm window over the mesh) arriving
+		// between two polls overflowed it and was dropped, to be resent.
+		return udp->bind(p_port, p_ip, 1 << 20);
 	}
 
 	Error get_socket_address(IPAddress *r_ip, uint16_t *r_port) {
@@ -211,6 +213,11 @@ public:
 
 	Error sendto(const uint8_t *p_buffer, int p_len, int &r_sent, IPAddress p_ip, uint16_t p_port) {
 		if (!connected) {
+			if (!udp->is_bound()) {
+				// planet: bound first, so the dialler's socket has the 1 MB ring too (connecting an unbound
+				// socket keeps the default 64 KB).
+				udp->bind(0, IPAddress("*"), 1 << 20);
+			}
 			udp->connect_to_host(p_ip, p_port);
 			if (dtls->connect_to_peer(udp, for_hostname, tls_options)) {
 				close();
