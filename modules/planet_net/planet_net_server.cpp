@@ -776,6 +776,12 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 			}
 			store_walker_state(*e, walker.place(walker_state(*e), point));
 		} break;
+		case MSG_REFRAME: {
+			const uint32_t from = r.u32();
+			if (r.ok() && client->turned) {
+				client->turned_until = MAX(from, 1u);
+			}
+		} break;
 		case MSG_COMMAND: {
 			// A console line, raw: the scripts parse, route and permit it (command_received).
 			const String line = r.text();
@@ -832,7 +838,14 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 	}
 }
 
-void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity) {
+PlanetNet::WalkerInput PlanetNetServer::_input_for(const Client &p_client, uint32_t p_tick, const WalkerInput &p_input) {
+	if (p_client.turned && (p_client.turned_until == 0 || p_tick < p_client.turned_until)) {
+		return carry_input(p_input, p_client.turn);
+	}
+	return p_input;
+}
+
+void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity, const Transform3D *p_carry) {
 	Writer w;
 	w.u8(MSG_WELCOME);
 	w.u16(PROTOCOL_VERSION);
@@ -848,6 +861,17 @@ void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity) {
 	w.f64(walker.uniform_down.x);
 	w.f64(walker.uniform_down.y);
 	w.f64(walker.uniform_down.z);
+	w.u8(p_carry != nullptr ? 1 : 0);
+	if (p_carry != nullptr) {
+		for (int i = 0; i < 3; ++i) {
+			for (int j = 0; j < 3; ++j) {
+				w.f64(double(p_carry->basis.rows[i][j]));
+			}
+		}
+		w.f64(double(p_carry->origin.x));
+		w.f64(double(p_carry->origin.y));
+		w.f64(double(p_carry->origin.z));
+	}
 	link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 }
 
@@ -875,6 +899,10 @@ void PlanetNetServer::_bind(int p_peer, Client &r_client, uint64_t p_id) {
 	r_client.entity = p_id;
 	r_client.welcomed = true;
 	r_client.standby = false;
+	// From another zone: the inputs it sent here on standby were chosen in that zone's frame (MSG_REFRAME).
+	r_client.turned = e->arrival_carried;
+	r_client.turn = e->arrival_carry.basis.orthonormalized();
+	r_client.turned_until = 0;
 	if (!r_client.player_key.is_empty()) {
 		PlayerRecord rec;
 		rec.entity = p_id;
@@ -890,7 +918,7 @@ void PlanetNetServer::_bind(int p_peer, Client &r_client, uint64_t p_id) {
 		for (uint32_t k = e->walk_tick + 1; k <= tick; ++k) {
 			const WalkerInput *in = r_client.inputs.getptr(k);
 			if (in != nullptr) {
-				r_client.last_input = *in;
+				r_client.last_input = _input_for(r_client, k, *in);
 				r_client.has_input = true;
 			}
 			const uint32_t *view = r_client.input_views.getptr(k);
@@ -910,7 +938,8 @@ void PlanetNetServer::_bind(int p_peer, Client &r_client, uint64_t p_id) {
 		e->history[k] = e->state.position;
 		e->history_tick[k] = tick;
 	}
-	_send_welcome(p_peer, p_id);
+	_send_welcome(p_peer, p_id, e->arrival_carried ? &e->arrival_carry : nullptr);
+	e->arrival_carried = false;
 	_send_health(*e);
 	emit_signal(SNAME("client_connected"), p_peer, int64_t(p_id));
 }
@@ -1144,7 +1173,7 @@ PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes
 			e->mirror = true; // until it is made ours below
 		}
 		e->state = s;
-		e->walk = walk;
+		e->walk = moved ? carry_state(walk, p_transform) : walk;
 		e->walk.position = s.position;
 		e->walk.velocity = s.velocity;
 		e->walk.rotation = s.rotation;
@@ -1175,6 +1204,9 @@ PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes
 			if (flags & EXPORT_PLAYER) {
 				e->await_key = key;
 				e->owner_peer = 0;
+				// From another zone's frame: its client is told the carry when bound, and its inputs turned.
+				e->arrival_carried = moved;
+				e->arrival_carry = p_transform;
 				// Its client may be here already, on standby.
 				for (KeyValue<int, Client> &C : clients) {
 					if (C.value.entity == 0 && !key.is_empty() && C.value.player_key == key) {
@@ -1276,8 +1308,11 @@ void PlanetNetServer::_step() {
 			continue;
 		}
 		const WalkerInput *arrived = client.inputs.getptr(tick);
+		if (client.turned && client.turned_until != 0 && tick >= client.turned_until) {
+			client.turned = false;
+		}
 		if (arrived != nullptr) {
-			client.last_input = *arrived;
+			client.last_input = _input_for(client, tick, *arrived);
 			client.has_input = true;
 			++client.inputs_applied;
 		} else if (client.has_input) {

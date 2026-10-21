@@ -60,7 +60,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 22;
+constexpr uint16_t PROTOCOL_VERSION = 23;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u8 flags (HelloFlags), u16 n, n bytes of player key
@@ -69,7 +69,8 @@ enum MessageType : uint8_t {
 	//              u32 regions per face edge, f64 walk speed, u64 the move table's hash (a client whose
 	//              table differs leaves: it would mispredict every move), u64 space (0 the planet, else a
 	//              zone: docs/SERVER_MESH.md), u8 terrain under the walker, f64 x3 uniform down (zero:
-	//              toward the planet's centre)
+	//              toward the planet's centre), u8 carried: 1 if your player was handed here from another
+	//              zone, then f64 x12 the carry (basis rows, origin) from that zone's frame into this one's
 	MSG_PING, // client -> server: f64 client clock (s)
 	MSG_PONG, // server -> client: f64 client clock echoed, f64 server time (ticks)
 	MSG_INPUT, // client -> server: u32 newest snapshot seq, u32 ack bits, u8 n,
@@ -102,6 +103,9 @@ enum MessageType : uint8_t {
 	//               A welcome on the standby connection naming your entity means it is there; switch.
 	MSG_DATA, // server -> client, world channel: u8 kind, u32 n, n bytes. Bulk data for the scripts, carried
 	//           unread (PlanetNetClient::data_received) -- the AutoDm window a player is in, say.
+	MSG_REFRAME, // client -> server, control: u32 tick. After a welcome that carried it into another zone's
+	//              frame: its inputs from this tick on are chosen in the new frame; those before, in the old
+	//              (the server turns them by the carry, as the client does replaying them).
 };
 
 constexpr uint32_t MAX_DATA = 16u << 20; // bytes of one MSG_DATA

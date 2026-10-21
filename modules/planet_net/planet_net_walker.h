@@ -40,6 +40,7 @@
 #include "core/math/planet_det_math.h"
 #include "planet_net_moves.h"
 #include "core/math/quaternion.h"
+#include "core/math/transform_3d.h"
 #include "core/math/vector2.h"
 #include "core/math/vector3.h"
 #include "core/templates/hash_set.h"
@@ -241,6 +242,30 @@ constexpr uint16_t POSE_CROUCH = 1u << 12;
 // A DM in flight (FLAG_NOCLIP): drawn as one, and nobody's body to bump into.
 constexpr uint16_t POSE_NOCLIP = 1u << 15;
 constexpr int POSE_AWARE_SHIFT = 13;
+// A walker carried from one zone's frame into the next's by a rigid transform (planet-demo
+// docs/SYSTEM_WORLD.md, "Zone moves"): its place and its aimed point moved, every direction it keeps turned.
+inline WalkerState carry_state(const WalkerState &p_state, const Transform3D &p_carry) {
+	const Basis turn = p_carry.basis.orthonormalized();
+	WalkerState s = p_state;
+	s.position = p_carry.xform(s.position);
+	s.velocity = turn.xform(s.velocity);
+	s.rotation = (turn.get_quaternion() * s.rotation).normalized();
+	s.reference = turn.xform(s.reference);
+	s.normal = turn.xform(s.normal);
+	if (s.aim != Vector3()) {
+		s.aim = p_carry.xform(s.aim);
+	}
+	return s;
+}
+
+// An input chosen in one zone's frame, for a walker carried into the next's: its aim (an offset -- a DM's
+// flight, an ability's target) turned with it. Moving and yaw are the walker's own, and need nothing.
+inline WalkerInput carry_input(const WalkerInput &p_input, const Basis &p_turn) {
+	WalkerInput in = p_input;
+	in.aim = p_turn.xform(in.aim);
+	return in;
+}
+
 inline uint16_t pose_of(const WalkerState &p_state) {
 	return uint16_t((p_state.mode & 15u) | (uint16_t(p_state.action) << 4) | ((p_state.flags & FLAG_CROUCH) ? POSE_CROUCH : 0u) |
 			((p_state.flags & FLAG_NOCLIP) ? POSE_NOCLIP : 0u));

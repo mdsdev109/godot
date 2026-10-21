@@ -113,6 +113,11 @@ private:
 		uint32_t view_tick = 0;
 		PlanetNet::WalkerInput last_input;
 		bool has_input = false;
+		// Handed here from another zone (a transformed import): its inputs before `turned_until` were chosen
+		// in that zone's frame, and are turned by `turn` when applied (0: not told yet -- all of them).
+		bool turned = false;
+		Basis turn;
+		uint32_t turned_until = 0;
 		// Teleports applied, mod 256; snapshots carry it so the client can tell word from before one.
 		uint8_t teleports = 0;
 		uint32_t last_applied_tick = 0;
@@ -149,6 +154,9 @@ private:
 		// kept here but in `state`, which is what replicates: read and write it through walker_state()
 		// and store_walker_state(), never field by field -- new walker state then cannot be forgotten.
 		PlanetNet::WalkerState walk;
+		// A player imported from another zone's frame, by this carry, until its client is bound (_bind).
+		bool arrival_carried = false;
+		Transform3D arrival_carry;
 		// Combat (docs/COMBAT.md). A target has health_max > 0: players (when player_hits) and what
 		// set_entity_health makes one, such as a training dummy. Health refills after a rest.
 		int32_t health = 0;
@@ -238,7 +246,8 @@ private:
 	void _strike(uint64_t p_attacker, Entity &r_attacker, uint64_t p_target, Entity &r_target, const Vector3 &p_at);
 	void _send_cast(uint64_t p_caster, const Entity &p_entity, uint32_t p_start);
 	void _send_health(const Entity &p_entity);
-	void _send_welcome(int p_peer, uint64_t p_entity);
+	void _send_welcome(int p_peer, uint64_t p_entity, const Transform3D *p_carry = nullptr);
+	static PlanetNet::WalkerInput _input_for(const Client &p_client, uint32_t p_tick, const PlanetNet::WalkerInput &p_input);
 	// Binds a client to a player entity handed here, stepping it from when it left its old server to now
 	// on the inputs the client has already sent here.
 	void _bind(int p_peer, Client &r_client, uint64_t p_id);

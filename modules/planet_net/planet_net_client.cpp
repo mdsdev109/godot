@@ -77,6 +77,7 @@ void PlanetNetClient::disconnect_from_server() {
 	smoothing = Vector3();
 	teleports_requested = 0;
 	teleport_restart = false;
+	carry_active = false;
 	if (was) {
 		emit_signal(SNAME("disconnected"));
 	}
@@ -147,8 +148,11 @@ void PlanetNetClient::_poll_standby() {
 				const double volume_cell = r.f64();
 				r.f64(); // walk speed
 				r.u64(); // move hash
+				Transform3D carry;
+				bool carried = false;
 				if (entity != 0) {
 					_read_space(r);
+					carried = _read_carry(r, carry);
 				}
 				if (!r.ok() || version != PROTOCOL_VERSION) {
 					standby().close();
@@ -160,7 +164,7 @@ void PlanetNetClient::_poll_standby() {
 					standby_ready = true;
 				} else {
 					regions.volume_cell = volume_cell;
-					_promote(sid, entity);
+					_promote(sid, entity, carried ? &carry : nullptr);
 					return;
 				}
 			} break;
@@ -171,7 +175,26 @@ void PlanetNetClient::_poll_standby() {
 // The next server has our player: it is the one now. Everything known carries over -- the clock (servers
 // share it), the prediction (it stepped the player on the inputs sent to both), the entities (the same
 // ids) -- but not the snapshot bookkeeping, which was the old server's.
-void PlanetNetClient::_promote(uint16_t p_server_id, uint64_t p_entity) {
+bool PlanetNetClient::_read_carry(Reader &r_reader, Transform3D &r_carry) {
+	if (r_reader.u8() == 0) {
+		return false;
+	}
+	for (int i = 0; i < 3; ++i) {
+		for (int j = 0; j < 3; ++j) {
+			r_carry.basis.rows[i][j] = real_t(r_reader.f64());
+		}
+	}
+	r_carry.origin.x = r_reader.f64();
+	r_carry.origin.y = r_reader.f64();
+	r_carry.origin.z = r_reader.f64();
+	return r_reader.ok();
+}
+
+WalkerInput PlanetNetClient::_input_of(const Frame &p_frame) const {
+	return carry_active && p_frame.tick < carry_until ? carry_input(p_frame.input, carry_turn) : p_frame.input;
+}
+
+void PlanetNetClient::_promote(uint16_t p_server_id, uint64_t p_entity, const Transform3D *p_carry) {
 	link().close();
 	peers[primary] = 0;
 	primary = 1 - primary;
@@ -192,6 +215,28 @@ void PlanetNetClient::_promote(uint16_t p_server_id, uint64_t p_entity) {
 	switched_at = clock;
 	++switch_count;
 	_send_look();
+	if (p_carry != nullptr) {
+		// Into another zone (planet-demo docs/SYSTEM_WORLD.md, "Zone moves"): the new server has our player
+		// where the old one did, carried into its frame; so is everything we predicted, and our inputs up to
+		// now are replayed turned, as the server applies them -- the switch costs no correction.
+		const Basis turn = p_carry->basis.orthonormalized();
+		predicted = carry_state(predicted, *p_carry);
+		for (Frame &f : frames) {
+			f.state = carry_state(f.state, *p_carry);
+		}
+		smoothing = turn.xform(smoothing);
+		carry_active = true;
+		carry_turn = turn;
+		carry_until = predicted_tick + 1;
+		Writer w;
+		w.u8(MSG_REFRAME);
+		w.u32(carry_until);
+		link().send(peers[primary], CHANNEL_CONTROL, w.data(), true);
+		// What the old server showed us is in the old frame: gone at once, not drawn a second and a half
+		// in the wrong place.
+		switched_at = clock - 10.0;
+		emit_signal(SNAME("carried"), *p_carry);
+	}
 	emit_signal(SNAME("switched"), int(p_server_id));
 }
 
@@ -327,6 +372,9 @@ void PlanetNetClient::poll(double p_delta) {
 	_poll_standby();
 	// After a switch, what the new server has not mentioned within a second and a half is not near any
 	// more: the old server would have removed it, and the new one never had it to remove.
+	if (carry_active && (frames.is_empty() || frames[0].tick >= carry_until)) {
+		carry_active = false; // nothing left predicted from before the carry
+	}
 	if (!stale.is_empty() && clock - switched_at > 1.5) {
 		for (const uint64_t id : stale) {
 			if (id != local_entity) {
@@ -510,7 +558,7 @@ void PlanetNetClient::_confirm(uint32_t p_tick, const WalkerState &p_state) {
 	s.rotation = frames[at].state.rotation;
 	frames[at].state = s;
 	for (uint32_t i = uint32_t(at) + 1; i < frames.size(); ++i) {
-		s = walker.step(s, frames[i].input, 1.0 / TICK_HZ);
+		s = walker.step(s, _input_of(frames[i]), 1.0 / TICK_HZ);
 		frames[i].state = s;
 	}
 	predicted = s;
@@ -667,9 +715,19 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 			const double walk_speed = r.f64();
 			const uint64_t move_hash = r.u64();
 			_read_space(r);
+			Transform3D carry;
+			const bool carried = _read_carry(r, carry);
 			if (!r.ok() || version != PROTOCOL_VERSION) {
 				disconnect_from_server();
 				return;
+			}
+			if (carried) {
+				// Bound to a player handed here from another zone, on a fresh connection: nothing predicted
+				// to carry, and every input from here on is in this zone's frame.
+				Writer w;
+				w.u8(MSG_REFRAME);
+				w.u32(1);
+				link().send(peers[primary], CHANNEL_CONTROL, w.data(), true);
 			}
 			const uint64_t own_hash = move_hash_override != 0 ? move_hash_override : moves().hash;
 			if (move_hash != own_hash) {
@@ -1086,6 +1144,9 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("send_world_change", "point", "data"), &PlanetNetClient::send_world_change);
 	ADD_SIGNAL(MethodInfo("disconnected"));
 	ADD_SIGNAL(MethodInfo("switched", PropertyInfo(Variant::INT, "server_id")));
+	// Just before "switched", when the move was into another zone: the transform from the old zone's frame
+	// into the new one's, the servers', which carried the player and its prediction.
+	ADD_SIGNAL(MethodInfo("carried", PropertyInfo(Variant::TRANSFORM3D, "carry")));
 	ADD_SIGNAL(MethodInfo("space_changed", PropertyInfo(Variant::INT, "space")));
 	ClassDB::bind_method(D_METHOD("get_space"), &PlanetNetClient::get_space);
 	ADD_SIGNAL(MethodInfo("transfer_requested", PropertyInfo(Variant::STRING, "address"), PropertyInfo(Variant::INT, "port")));

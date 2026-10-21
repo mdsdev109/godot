@@ -105,7 +105,14 @@ private:
 	double switched_at = -1.0; // `clock` at the last switch
 	HashSet<uint64_t> stale; // entities from before the last switch the new server has not mentioned yet
 	void _poll_standby();
-	void _promote(uint16_t p_server_id, uint64_t p_entity);
+	void _promote(uint16_t p_server_id, uint64_t p_entity, const Transform3D *p_carry = nullptr);
+	static bool _read_carry(PlanetNet::Reader &r_reader, Transform3D &r_carry);
+	// Handed here from another zone (a welcome with a carry): the inputs of ticks before `carry_until` were
+	// chosen in the old zone's frame, and are replayed turned by `carry_turn`, as the server applies them.
+	bool carry_active = false;
+	Basis carry_turn;
+	uint32_t carry_until = 0;
+	PlanetNet::WalkerInput _input_of(const Frame &p_frame) const;
 	void _send_hello(PlanetNetLink &r_link, int p_peer, uint8_t p_flags);
 	bool link_up = false;
 	bool welcomed = false;
