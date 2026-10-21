@@ -799,6 +799,14 @@ Dictionary PlanetCliffSkin3D::build(const Ref<PlanetField3D> &p_field, double p_
 				u = lerp(double(s.ka % n), double(s.kb % n), t);
 				v = lerp(double(s.ka / n), double(s.kb / n), t);
 			}
+			if (mk > 0.9) {
+				// Where the wall is full the face lies outside the terrain: the blurred push, lift and sink
+				// carry an edge's sink into a full wall's cells and left it up to 2 m under the ground there.
+				const double ground = field.eval_radius(p.normalized());
+				if (p.length() < ground) {
+					p = p.normalized() * ground;
+				}
+			}
 			vw[vi] = p - p_anchor;
 			mw[vi] = float(mk);
 			cw[vi] = Color(float(bl), 0.0f, 0.0f, 1.0f);
