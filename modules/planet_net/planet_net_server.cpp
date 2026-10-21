@@ -1383,42 +1383,30 @@ void PlanetNetServer::_step() {
 }
 
 void PlanetNetServer::_interest_regions(const Vector3 &p_centre, HashSet<uint32_t> &r_regions) const {
-	// Sample the tangent disk at half a region's spacing and collect the regions the samples land
-	// in. Works across cube faces with no special cases, because every sample is simply mapped.
-	if (regions.is_volume()) {
-		// A zone in volume mode: the ball round the centre, sampled the same way.
-		const double step = regions.cell_size() * 0.5;
-		const double reach = interest_radius + regions.cell_size();
-		const int n = int(Math::ceil(reach / step));
-		const double limit = (reach / step) * (reach / step) + 1.0;
-		for (int a = -n; a <= n; ++a) {
-			for (int b = -n; b <= n; ++b) {
-				for (int c = -n; c <= n; ++c) {
-					if (double(a * a + b * b + c * c) <= limit) {
-						r_regions.insert(regions.key_of(p_centre + Vector3(double(a), double(b), double(c)) * step));
-					}
-				}
-			}
-		}
-		return;
-	}
-	const Vector3 up = p_centre.normalized();
-	Vector3 north = Vector3(0, 1, 0) - up * up.y;
-	if (north.length_squared() < 1e-12) {
-		north = Vector3(0, 0, -1) - up * up.z;
-	}
-	north.normalize();
-	const Vector3 east = north.cross(up);
-	const double step = regions.cell_size() * 0.5;
+	// Only a region holding something -- an entity, or a world change in its journal -- can matter to a
+	// client, so only those are looked at: the cost is what exists, never the empty space in reach. It
+	// used to sample every cell position in reach at half a cell, the square (on a surface) or the cube (in
+	// volume mode) of reach over the cell: a ball 3000 m round in 64 m cells was 7 million keys a snapshot,
+	// 65 ms a server tick. A region is in reach when its centre is within interest_radius and a cell of it
+	// (more than its half-diagonal, whatever the cube sphere's warp). On a surface the distance is along the
+	// ground: the player put down on the regions' sphere, so one flying high still sees what is below.
 	const double reach = interest_radius + regions.cell_size();
-	const int n = int(Math::ceil(reach / step));
-	const double limit = (reach / step) * (reach / step) + 1.0;
-	for (int a = -n; a <= n; ++a) {
-		for (int b = -n; b <= n; ++b) {
-			if (double(a * a + b * b) > limit) {
-				continue;
-			}
-			r_regions.insert(regions.key_of(p_centre + (east * double(a) + north * double(b)) * step));
+	const double reach_squared = reach * reach;
+	Vector3 at = p_centre.normalized() * regions.radius;
+	if (regions.is_volume()) {
+		// The grid's edge cells hold everything past it (Regions::key_of clamps), so the centre is clamped
+		// the same way: two players far out in a system's space are in one edge cell and see each other.
+		const double edge = double(Regions::VOLUME_SIDE / 2) * regions.volume_cell;
+		at = Vector3(CLAMP(p_centre.x, -edge, edge), CLAMP(p_centre.y, -edge, edge), CLAMP(p_centre.z, -edge, edge));
+	}
+	for (const KeyValue<uint32_t, LocalVector<uint64_t>> &R : region_index) {
+		if (regions.centre(R.key).distance_squared_to(at) <= reach_squared) {
+			r_regions.insert(R.key);
+		}
+	}
+	for (const KeyValue<uint32_t, LocalVector<WorldChange>> &J : journal) {
+		if (!r_regions.has(J.key) && regions.centre(J.key).distance_squared_to(at) <= reach_squared) {
+			r_regions.insert(J.key);
 		}
 	}
 }
