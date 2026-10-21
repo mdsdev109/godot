@@ -349,7 +349,9 @@ public:
 	// imported owned waits for its client (await_key), and is bound to it when it arrives -- or at once,
 	// if it is already here on standby -- stepped to the present on the inputs it has sent.
 	PackedByteArray export_entities(const PackedInt64Array &p_ids) const;
-	PackedInt64Array import_entities(const PackedByteArray &p_bytes, bool p_mirror);
+	// p_transform takes the exporter's frame to this server's: identity for a server of the same planet, a
+	// seam's for one of another zone (a mirror seen across a gate's ring -- the game's docs/SERVER_MESH.md).
+	PackedInt64Array import_entities(const PackedByteArray &p_bytes, bool p_mirror, const Transform3D &p_transform = Transform3D());
 	bool is_entity_mirror(int64_t p_id) const {
 		const Entity *e = entities.getptr(uint64_t(p_id));
 		return e != nullptr && e->mirror;

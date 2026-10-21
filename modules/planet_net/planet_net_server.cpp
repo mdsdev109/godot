@@ -1070,7 +1070,10 @@ PackedByteArray PlanetNetServer::export_entities(const PackedInt64Array &p_ids) 
 	return out;
 }
 
-PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes, bool p_mirror) {
+PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes, bool p_mirror, const Transform3D &p_transform) {
+	const bool moved = !p_transform.is_equal_approx(Transform3D());
+	const Basis turn = p_transform.basis.orthonormalized();
+	const Quaternion turn_q = turn.get_quaternion();
 	PackedInt64Array out;
 	Reader r(p_bytes.ptr(), uint32_t(p_bytes.size()));
 	if (r.u32() != MAGIC_EXPORT) {
@@ -1122,6 +1125,12 @@ PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes
 		}
 		if (!r.ok()) {
 			break;
+		}
+		if (moved) {
+			// Into this server's frame. Only what draws it: a mirror is never stepped here.
+			s.position = p_transform.xform(s.position);
+			s.velocity = turn.xform(s.velocity);
+			s.rotation = (turn_q * s.rotation).normalized();
 		}
 		Entity *e = entities.getptr(s.id);
 		if (e != nullptr && !e->mirror) {
@@ -2236,7 +2245,7 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_epoch"), &PlanetNetServer::get_epoch);
 	ClassDB::bind_method(D_METHOD("slew_epoch", "unix_seconds"), &PlanetNetServer::slew_epoch);
 	ClassDB::bind_method(D_METHOD("export_entities", "ids"), &PlanetNetServer::export_entities);
-	ClassDB::bind_method(D_METHOD("import_entities", "bytes", "mirror"), &PlanetNetServer::import_entities);
+	ClassDB::bind_method(D_METHOD("import_entities", "bytes", "mirror", "transform"), &PlanetNetServer::import_entities, DEFVAL(Transform3D()));
 	ClassDB::bind_method(D_METHOD("is_entity_mirror", "id"), &PlanetNetServer::is_entity_mirror);
 	ClassDB::bind_method(D_METHOD("is_entity_awaiting", "id"), &PlanetNetServer::is_entity_awaiting);
 	ClassDB::bind_method(D_METHOD("detach_client", "peer"), &PlanetNetServer::detach_client);
