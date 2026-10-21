@@ -60,7 +60,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 21;
+constexpr uint16_t PROTOCOL_VERSION = 22;
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u8 flags (HelloFlags), u16 n, n bytes of player key
@@ -100,7 +100,11 @@ enum MessageType : uint8_t {
 	MSG_TRANSFER, // server -> client, control: text address, u16 port. Your player is moving to that
 	//               server: connect there on standby and send your inputs to both (docs/SERVER_MESH.md).
 	//               A welcome on the standby connection naming your entity means it is there; switch.
+	MSG_DATA, // server -> client, world channel: u8 kind, u32 n, n bytes. Bulk data for the scripts, carried
+	//           unread (PlanetNetClient::data_received) -- the AutoDm window a player is in, say.
 };
+
+constexpr uint32_t MAX_DATA = 16u << 20; // bytes of one MSG_DATA
 
 // MSG_HELLO's flags.
 enum HelloFlags : uint8_t {
@@ -415,6 +419,13 @@ public:
 		return true;
 	}
 
+	void raw(const uint8_t *p_bytes, uint32_t p_n) {
+		const uint32_t at = bytes.size();
+		bytes.resize(at + p_n);
+		if (p_n > 0) {
+			std::memcpy(bytes.ptr() + at, p_bytes, p_n);
+		}
+	}
 	const LocalVector<uint8_t> &data() const { return bytes; }
 	uint32_t size() const { return bytes.size(); }
 	void truncate(uint32_t p_size) { bytes.resize(p_size); }
@@ -450,6 +461,18 @@ public:
 	uint16_t u16() { return get<uint16_t>(); }
 	uint32_t u32() { return get<uint32_t>(); }
 	uint64_t u64() { return get<uint64_t>(); }
+	// n raw bytes, or empty (and not ok) if they run past the end.
+	PackedByteArray raw(uint32_t p_n) {
+		PackedByteArray out;
+		if (!good || p_n > size - at) {
+			good = false;
+			return out;
+		}
+		out.resize(p_n);
+		std::memcpy(out.ptrw(), bytes + at, p_n);
+		at += p_n;
+		return out;
+	}
 	float f32() { return get<float>(); }
 	double f64() { return get<double>(); }
 	String text() {

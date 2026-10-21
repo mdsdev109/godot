@@ -337,6 +337,9 @@ public:
 	// (Unix seconds) and poll() steps to it, so every server with the same epoch is on the same tick and a
 	// client switching between them keeps its clock. Set before clients connect.
 	void set_epoch(double p_unix_seconds);
+	// The shared clock corrected (a sync with the universe's master clock): the epoch moved, the tick kept --
+	// poll() then waits or catches up to it, never stepping a tick twice.
+	void slew_epoch(double p_unix_seconds);
 	double get_epoch() const { return epoch; }
 
 	// Handing entities between servers (docs/SERVER_MESH.md). Exported whole -- state, walker, combat,
@@ -438,6 +441,8 @@ public:
 	// it says back, or anything else for a player to read, goes out by channel (MessageChannel: info,
 	// error, chat, system).
 	void send_message(int p_peer, int p_channel, const String &p_text);
+	// Bulk data to one client, for its scripts (MSG_DATA): at most MAX_DATA bytes, reliable, ordered.
+	void send_data(int p_peer, int p_kind, const PackedByteArray &p_bytes);
 	void broadcast_message(int p_channel, const String &p_text);
 	// The peer a player's entity is (0: not a player, or gone).
 	int get_entity_peer(int64_t p_id) const;

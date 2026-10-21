@@ -419,6 +419,20 @@ void PlanetNetServer::send_message(int p_peer, int p_channel, const String &p_te
 	link.send(p_peer, CHANNEL_CONTROL, w.data(), true);
 }
 
+void PlanetNetServer::send_data(int p_peer, int p_kind, const PackedByteArray &p_bytes) {
+	const Client *c = clients.getptr(p_peer);
+	ERR_FAIL_COND_MSG(uint32_t(p_bytes.size()) > MAX_DATA, "PlanetNetServer.send_data: more than MAX_DATA bytes.");
+	if (c == nullptr || !c->welcomed) {
+		return;
+	}
+	Writer w;
+	w.u8(MSG_DATA);
+	w.u8(uint8_t(CLAMP(p_kind, 0, 255)));
+	w.u32(uint32_t(p_bytes.size()));
+	w.raw(p_bytes.ptr(), uint32_t(p_bytes.size()));
+	link.send(p_peer, CHANNEL_WORLD, w.data(), true);
+}
+
 void PlanetNetServer::broadcast_message(int p_channel, const String &p_text) {
 	for (KeyValue<int, Client> &C : clients) {
 		send_message(C.key, p_channel, p_text);
@@ -615,6 +629,14 @@ void PlanetNetServer::set_epoch(double p_unix_seconds) {
 			}
 		}
 	}
+}
+
+void PlanetNetServer::slew_epoch(double p_unix_seconds) {
+	if (epoch < 0.0) {
+		set_epoch(p_unix_seconds);
+		return;
+	}
+	epoch = p_unix_seconds;
 }
 
 void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
@@ -2207,10 +2229,12 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_entity_walker", "id"), &PlanetNetServer::get_entity_walker);
 	ClassDB::bind_method(D_METHOD("set_entity_team", "id", "team"), &PlanetNetServer::set_entity_team);
 	ClassDB::bind_method(D_METHOD("send_message", "peer", "channel", "text"), &PlanetNetServer::send_message);
+	ClassDB::bind_method(D_METHOD("send_data", "peer", "kind", "bytes"), &PlanetNetServer::send_data);
 	ClassDB::bind_method(D_METHOD("broadcast_message", "channel", "text"), &PlanetNetServer::broadcast_message);
 	ClassDB::bind_method(D_METHOD("get_entity_peer", "id"), &PlanetNetServer::get_entity_peer);
 	ClassDB::bind_method(D_METHOD("set_epoch", "unix_seconds"), &PlanetNetServer::set_epoch);
 	ClassDB::bind_method(D_METHOD("get_epoch"), &PlanetNetServer::get_epoch);
+	ClassDB::bind_method(D_METHOD("slew_epoch", "unix_seconds"), &PlanetNetServer::slew_epoch);
 	ClassDB::bind_method(D_METHOD("export_entities", "ids"), &PlanetNetServer::export_entities);
 	ClassDB::bind_method(D_METHOD("import_entities", "bytes", "mirror"), &PlanetNetServer::import_entities);
 	ClassDB::bind_method(D_METHOD("is_entity_mirror", "id"), &PlanetNetServer::is_entity_mirror);

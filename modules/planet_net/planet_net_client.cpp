@@ -709,6 +709,14 @@ void PlanetNetClient::_handle(const LocalVector<uint8_t> &p_data) {
 				emit_signal(SNAME("hit"), hit);
 			}
 		} break;
+		case MSG_DATA: {
+			const uint8_t kind = r.u8();
+			const uint32_t n = r.u32();
+			const PackedByteArray bytes = n <= MAX_DATA ? r.raw(n) : PackedByteArray();
+			if (r.ok() && n <= MAX_DATA) {
+				emit_signal(SNAME("data_received"), int(kind), bytes);
+			}
+		} break;
 		case MSG_MESSAGE: {
 			const uint8_t channel = r.u8();
 			const String text = r.text();
@@ -1006,6 +1014,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("request_teleport", "point"), &PlanetNetClient::request_teleport);
 	ClassDB::bind_method(D_METHOD("send_command", "line"), &PlanetNetClient::send_command);
 	ADD_SIGNAL(MethodInfo("message", PropertyInfo(Variant::INT, "channel"), PropertyInfo(Variant::STRING, "text")));
+	ADD_SIGNAL(MethodInfo("data_received", PropertyInfo(Variant::INT, "kind"), PropertyInfo(Variant::PACKED_BYTE_ARRAY, "bytes")));
 	ClassDB::bind_method(D_METHOD("set_look", "look"), &PlanetNetClient::set_look);
 	ClassDB::bind_method(D_METHOD("set_solid_type", "type", "radius"), &PlanetNetClient::set_solid_type);
 	ClassDB::bind_method(D_METHOD("get_solid_types"), &PlanetNetClient::get_solid_types);
