@@ -326,6 +326,22 @@ public:
 	int get_predicted_tick() const { return int(predicted_tick); }
 	// The local player where it should be drawn: predicted, with corrections smoothed.
 	Vector3 get_predicted_position() const { return predicted.position + smoothing; }
+	// The world as the predicted player's walker sees it -- the same walker, field, colliders and rules as the
+	// server's -- for whoever draws or aims for the player (PlayerRig): the game's questions about where the
+	// player is go here, not to a walker of its own (planet-demo docs/ARCHITECTURE.md, "One path").
+	Vector3 get_up_at(const Vector3 &p_point) const { return walker.up_at(p_point); }
+	double get_ground_radius(const Vector3 &p_dir) const { return walker.ground_radius(p_dir.normalized()); }
+	Variant cast_ray(const Vector3 &p_from, const Vector3 &p_to) const {
+		Vector3 on;
+		if (walker.cast(p_from, p_to, on)) {
+			return on;
+		}
+		return Variant();
+	}
+	bool in_sight(const Vector3 &p_from, const Vector3 &p_to, double p_slack) const { return walker.sees(p_from, p_to, p_slack); }
+	// From the predicted player's feet, as the server judges it from the player's.
+	bool can_cast_at(const Vector3 &p_point) const { return walker.can_cast_from(predicted.position, p_point); }
+	bool is_inside(const Vector3 &p_point) const { return walker.inside(p_point); }
 	// For drawing: between the last two predicted ticks by this frame's place between them (a tick behind
 	// the newest). The game's decisions take the newest, get_predicted_position.
 	Vector3 get_predicted_display_position() const;

@@ -1116,6 +1116,12 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_predicting"), &PlanetNetClient::is_predicting);
 	ClassDB::bind_method(D_METHOD("get_predicted_tick"), &PlanetNetClient::get_predicted_tick);
 	ClassDB::bind_method(D_METHOD("get_predicted_position"), &PlanetNetClient::get_predicted_position);
+	ClassDB::bind_method(D_METHOD("get_up_at", "point"), &PlanetNetClient::get_up_at);
+	ClassDB::bind_method(D_METHOD("get_ground_radius", "direction"), &PlanetNetClient::get_ground_radius);
+	ClassDB::bind_method(D_METHOD("cast_ray", "from", "to"), &PlanetNetClient::cast_ray);
+	ClassDB::bind_method(D_METHOD("in_sight", "from", "to", "slack"), &PlanetNetClient::in_sight);
+	ClassDB::bind_method(D_METHOD("can_cast_at", "point"), &PlanetNetClient::can_cast_at);
+	ClassDB::bind_method(D_METHOD("is_inside", "point"), &PlanetNetClient::is_inside);
 	ClassDB::bind_method(D_METHOD("get_predicted_rotation"), &PlanetNetClient::get_predicted_rotation);
 	ClassDB::bind_method(D_METHOD("get_predicted_display_position"), &PlanetNetClient::get_predicted_display_position);
 	ClassDB::bind_method(D_METHOD("set_frame_ahead", "seconds"), &PlanetNetClient::set_frame_ahead);
