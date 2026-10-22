@@ -54,6 +54,10 @@ public:
 	static constexpr int ENTITY_TYPE_PLAYER = 1;
 	// Ticks of transform history kept per entity, for lag compensation and for the tests.
 	static constexpr int HISTORY_TICKS = 64;
+	// The most a walker handed here (or woken from a store) is stepped on to catch up to now: ten seconds.
+	// A handover between servers is a fraction of one; a record from the store can be hours old, and
+	// stepping every tick since was 13 s of one poll on a world unserved for six hours.
+	static constexpr uint32_t CARRY_MAX_TICKS = 10 * PlanetNet::TICK_HZ;
 	// Snapshots remembered per client, to apply acknowledgements to.
 	static constexpr int SENT_RECORDS = 64;
 

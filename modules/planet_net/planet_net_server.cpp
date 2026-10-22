@@ -915,7 +915,10 @@ void PlanetNetServer::_bind(int p_peer, Client &r_client, uint64_t p_id) {
 	const double dt = 1.0 / TICK_HZ;
 	if (e->walk_tick != 0 && e->walk_tick < tick) {
 		WalkerState st = walker_state(*e);
-		for (uint32_t k = e->walk_tick + 1; k <= tick; ++k) {
+		// At most CARRY_MAX_TICKS: a handover is a fraction of a second, but a player back from the store
+		// left hours ago, and every tick since is a step (DomainServer woke on an aged world in 13 s).
+		const uint32_t from = MAX(e->walk_tick, tick > CARRY_MAX_TICKS ? tick - CARRY_MAX_TICKS : 0u);
+		for (uint32_t k = from + 1; k <= tick; ++k) {
 			const WalkerInput *in = r_client.inputs.getptr(k);
 			if (in != nullptr) {
 				r_client.last_input = _input_for(r_client, k, *in);
@@ -1193,9 +1196,10 @@ PackedInt64Array PlanetNetServer::import_entities(const PackedByteArray &p_bytes
 			e->persistent = (flags & EXPORT_PERSISTENT) != 0;
 			e->walk_tick = from_tick;
 			if (e->npc && from_tick < tick) {
-				// Stepped on to now, on the input its brain last gave it.
+				// Stepped on to now, on the input its brain last gave it -- for CARRY_MAX_TICKS at most: from a
+				// store, hours on, it had walked 118 km in 13 s of one poll.
 				WalkerState st = walker_state(*e);
-				for (uint32_t k = from_tick; k < tick; ++k) {
+				for (uint32_t k = MAX(from_tick, tick > CARRY_MAX_TICKS ? tick - CARRY_MAX_TICKS : 0u); k < tick; ++k) {
 					st = walker.step(st, e->npc_input, dt);
 				}
 				store_walker_state(*e, st);
