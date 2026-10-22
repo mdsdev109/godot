@@ -814,7 +814,9 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				}
 			}
 			// Each packet repeats the last few inputs, so one lost packet costs nothing. Inputs for ticks
-			// already simulated are too late to matter.
+			// already simulated are too late to matter -- except to a client on standby, whose player arrives
+			// stepped on from the tick its old server handed it over at (_bind): it is sent every input it may
+			// need, most of them for ticks just gone here, kept as long as a standby's are (2 s).
 			for (uint8_t i = 0; i < n; ++i) {
 				const uint32_t input_tick = r.u32();
 				WalkerInput in;
@@ -827,7 +829,8 @@ void PlanetNetServer::_handle(int p_peer, const LocalVector<uint8_t> &p_data) {
 				in.aim.y = r.f32();
 				in.aim.z = r.f32();
 				const uint32_t view = r.u32();
-				if (r.ok() && input_tick > tick && input_tick <= tick + 4 * TICK_HZ) {
+				const bool in_time = input_tick > tick || (client->standby && input_tick + uint32_t(2 * TICK_HZ) > tick);
+				if (r.ok() && in_time && input_tick <= tick + 4 * TICK_HZ) {
 					client->inputs[input_tick] = in;
 					client->input_views[input_tick] = view;
 				}
@@ -2279,6 +2282,7 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("detach_client", "peer"), &PlanetNetServer::detach_client);
 	ClassDB::bind_method(D_METHOD("send_transfer", "peer", "address", "port"), &PlanetNetServer::send_transfer);
 	ClassDB::bind_method(D_METHOD("is_client_standby", "peer"), &PlanetNetServer::is_client_standby);
+	ClassDB::bind_method(D_METHOD("get_client_input_count", "peer"), &PlanetNetServer::get_client_input_count);
 	ClassDB::bind_method(D_METHOD("get_client_key", "peer"), &PlanetNetServer::get_client_key);
 	ClassDB::bind_method(D_METHOD("strike", "attacker", "target", "at"), &PlanetNetServer::strike);
 	ClassDB::bind_method(D_METHOD("relay_hit", "hit"), &PlanetNetServer::relay_hit);

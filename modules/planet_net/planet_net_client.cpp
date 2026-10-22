@@ -677,11 +677,27 @@ void PlanetNetClient::_send_input() {
 	last_ack_tick = now_tick;
 	const uint32_t n = predicting ? MIN(frames.size(), uint32_t(INPUT_REDUNDANCY)) : 0;
 	Writer w;
+	_write_inputs(w, n);
+	link().send(peers[primary], CHANNEL_STATE, w.data(), false);
+	if (standby_ready) {
+		// The next server keeps them for when the player arrives there (docs/SERVER_MESH.md) -- all of them still
+		// held, not the last few: it replays from the tick the old server hands the player over at, and the
+		// prediction runs ahead of that by its lead, the inputs for those ticks sent before this connection
+		// was up. With the last few only, it had none for them, stood the walker still there, and every move
+		// cost a correction (planet-demo tests/level_gate_checks.gd).
+		const uint32_t all = predicting ? MIN(frames.size(), uint32_t(STANDBY_INPUTS)) : 0;
+		Writer sw;
+		_write_inputs(sw, all);
+		standby().send(peers[1 - primary], CHANNEL_STATE, sw.data(), false);
+	}
+}
+
+void PlanetNetClient::_write_inputs(Writer &w, uint32_t p_count) const {
 	w.u8(MSG_INPUT);
 	w.u32(newest_seq);
 	w.u32(ack_bits);
-	w.u8(uint8_t(n));
-	for (uint32_t i = frames.size() - n; i < frames.size(); ++i) {
+	w.u8(uint8_t(p_count));
+	for (uint32_t i = frames.size() - p_count; i < frames.size(); ++i) {
 		w.u32(frames[i].tick);
 		w.f32(frames[i].input.move.x);
 		w.f32(frames[i].input.move.y);
@@ -692,11 +708,6 @@ void PlanetNetClient::_send_input() {
 		w.f32(float(frames[i].input.aim.y));
 		w.f32(float(frames[i].input.aim.z));
 		w.u32(frames[i].view);
-	}
-	link().send(peers[primary], CHANNEL_STATE, w.data(), false);
-	if (standby_ready) {
-		// The next server keeps them for when the player arrives there (docs/SERVER_MESH.md).
-		standby().send(peers[1 - primary], CHANNEL_STATE, w.data(), false);
 	}
 }
 

@@ -383,6 +383,12 @@ public:
 		const Client *c = clients.getptr(p_peer);
 		return c != nullptr && c->standby;
 	}
+	// The inputs a client has sent that are kept (for the ticks to come, or a standby's of the last 2 s): a standby
+	// client is ready to be handed its player once it has sent some, or the replay (_bind) has none to step on.
+	int get_client_input_count(int p_peer) const {
+		const Client *c = clients.getptr(p_peer);
+		return c != nullptr ? int(c->inputs.size()) : 0;
+	}
 	String get_client_key(int p_peer) const {
 		const Client *c = clients.getptr(p_peer);
 		return c != nullptr ? c->player_key : String();

@@ -58,6 +58,8 @@ public:
 	// States kept per entity. Must cover MAX_BASELINE_AGE ticks at the fastest update rate.
 	static constexpr int ENTITY_HISTORY = 64;
 	static constexpr int INPUT_REDUNDANCY = 4;
+	// Inputs sent to a standby server, at most: every one still held (the prediction's lead and then some).
+	static constexpr int STANDBY_INPUTS = 255;
 	// Predicted ticks kept for reconciliation: must cover a round trip plus the lead.
 	static constexpr int PREDICTION_FRAMES = 128;
 	static constexpr int CLOCK_SAMPLES = 16;
@@ -196,6 +198,7 @@ private:
 	void _update_clock(double p_delta);
 	void _send_ping();
 	void _send_input();
+	void _write_inputs(PlanetNet::Writer &r_writer, uint32_t p_count) const;
 	void _advance_prediction(double p_delta);
 	void _confirm(uint32_t p_tick, const PlanetNet::WalkerState &p_state);
 	bool _sample(uint64_t p_id, PlanetNet::EntityState &r_state) const;
