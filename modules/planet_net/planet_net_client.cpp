@@ -247,11 +247,13 @@ void PlanetNetClient::_read_space(Reader &r_reader) {
 	down.x = r_reader.f64();
 	down.y = r_reader.f64();
 	down.z = r_reader.f64();
+	const double gravity = r_reader.f64();
 	if (!r_reader.ok()) {
 		return;
 	}
 	walker.use_terrain = terrain;
 	walker.uniform_down = down;
+	walker.gravity = gravity;
 	if (s != space) {
 		space = s;
 		emit_signal(SNAME("space_changed"), int64_t(s));
@@ -1160,6 +1162,7 @@ void PlanetNetClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetNetClient::set_use_terrain);
 	ClassDB::bind_method(D_METHOD("get_use_terrain"), &PlanetNetClient::get_use_terrain);
 	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetNetClient::set_uniform_down);
+	ClassDB::bind_method(D_METHOD("get_gravity"), &PlanetNetClient::get_gravity);
 	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetNetClient::get_uniform_down);
 	ClassDB::bind_method(D_METHOD("is_switch_pending"), &PlanetNetClient::is_switch_pending);
 	ClassDB::bind_method(D_METHOD("get_switch_count"), &PlanetNetClient::get_switch_count);

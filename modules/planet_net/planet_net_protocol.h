@@ -60,7 +60,7 @@ constexpr int CHANNEL_STATE = 1;
 constexpr int CHANNEL_WORLD = 2;
 constexpr int CHANNEL_COUNT = 3;
 
-constexpr uint16_t PROTOCOL_VERSION = 23;
+constexpr uint16_t PROTOCOL_VERSION = 24; // 24: a zone's gravity with its down
 
 enum MessageType : uint8_t {
 	MSG_HELLO = 1, // client -> server: u16 version, u8 flags (HelloFlags), u16 n, n bytes of player key

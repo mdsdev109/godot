@@ -316,6 +316,8 @@ public:
 	bool get_use_terrain() const { return walker.use_terrain; }
 	void set_uniform_down(const Vector3 &p_down) { walker.uniform_down = p_down; }
 	Vector3 get_uniform_down() const { return walker.uniform_down; }
+	// The zone's gravity, as its server said (PlanetNetServer::set_gravity).
+	double get_gravity() const { return walker.gravity; }
 	// The terrain to predict on: must be the server's field, or prediction never matches.
 	void set_field(const Ref<PlanetField3D> &p_field) { walker.field = p_field; }
 	Ref<PlanetField3D> get_field() const { return walker.field; }

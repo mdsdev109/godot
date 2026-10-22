@@ -400,6 +400,9 @@ public:
 	bool get_use_terrain() const { return walker.use_terrain; }
 	void set_uniform_down(const Vector3 &p_down) { walker.uniform_down = p_down; }
 	Vector3 get_uniform_down() const { return walker.uniform_down; }
+	// A zone's gravity, m/s^2 (0: none -- a level with no floor, docs LEVELS.md); told to its clients with its down.
+	void set_gravity(double p_gravity) { walker.gravity = MAX(p_gravity, 0.0); }
+	double get_gravity() const { return walker.gravity; }
 	// A blow judged elsewhere (the attacker's server, against its mirror of a target owned here): applied
 	// as if struck here, the attacker's state as mirrored here (docs/SERVER_MESH.md, fighting across
 	// servers).

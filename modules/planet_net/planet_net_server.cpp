@@ -861,6 +861,7 @@ void PlanetNetServer::_send_welcome(int p_peer, uint64_t p_entity, const Transfo
 	w.f64(walker.uniform_down.x);
 	w.f64(walker.uniform_down.y);
 	w.f64(walker.uniform_down.z);
+	w.f64(walker.gravity);
 	w.u8(p_carry != nullptr ? 1 : 0);
 	if (p_carry != nullptr) {
 		for (int i = 0; i < 3; ++i) {
@@ -2289,6 +2290,8 @@ void PlanetNetServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_use_terrain", "use"), &PlanetNetServer::set_use_terrain);
 	ClassDB::bind_method(D_METHOD("get_use_terrain"), &PlanetNetServer::get_use_terrain);
 	ClassDB::bind_method(D_METHOD("set_uniform_down", "down"), &PlanetNetServer::set_uniform_down);
+	ClassDB::bind_method(D_METHOD("set_gravity", "metres_per_second_squared"), &PlanetNetServer::set_gravity);
+	ClassDB::bind_method(D_METHOD("get_gravity"), &PlanetNetServer::get_gravity);
 	ClassDB::bind_method(D_METHOD("get_uniform_down"), &PlanetNetServer::get_uniform_down);
 	ClassDB::bind_method(D_METHOD("save_regions", "keys", "unload"), &PlanetNetServer::save_regions);
 	ClassDB::bind_method(D_METHOD("load_regions", "keys"), &PlanetNetServer::load_regions);
