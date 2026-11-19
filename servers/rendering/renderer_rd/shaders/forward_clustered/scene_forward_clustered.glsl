@@ -1026,6 +1026,8 @@ layout(location = 12) in vec4 diffuse_light_interp;
 layout(location = 13) in vec4 specular_light_interp;
 #endif
 
+#include "../planet_flatten_inc.glsl"
+
 #if defined(POINT_SIZE_USED) && defined(POINT_COORD_USED)
 layout(location = 14) in vec2 point_coord_interp;
 #endif
@@ -1288,7 +1290,17 @@ void fragment_shader(in SceneData scene_data) {
 		normal_highp = -normal_highp;
 	}
 #endif // DO_SIDE_CHECK
+	vec3 planet_flatten_normal_in = normal_highp;
 #endif // NORMAL_USED
+
+	// Planet flattening's turn here (planet_flatten_turn_at), view space: PLANET_FLATTEN to the material.
+	vec4 planet_flatten_turn = vec4(0.0);
+#if !defined(PLANET_FLATTEN_DISABLED) && !defined(OVERRIDE_POSITION)
+	if (scene_data_block.data.planet_flatten_enabled != 0u && (instances.data[instance_index_interp].layer_mask & scene_data_block.data.planet_flatten_layers) != 0u) {
+		planet_flatten_turn = planet_flatten_turn_at(vertex_interp, scene_data_block.data.planet_flatten_center, scene_data_block.data.planet_flatten_eye,
+				scene_data_block.data.planet_flatten_radius, scene_data_block.data.planet_flatten_ground_radius, scene_data_block.data.planet_flatten_amount);
+	}
+#endif
 
 #ifdef UV_USED
 	vec2 uv = uv_interp;
@@ -1373,6 +1385,17 @@ void fragment_shader(in SceneData scene_data) {
 	{
 #CODE : FRAGMENT
 	}
+
+#ifdef NORMAL_USED
+	// A normal the material wrote is where the surface truly is (its own field, its own varyings): turned as the vertex
+	// was. One it left alone came turned from the vertex.
+	if (planet_flatten_turn.w > 0.0 && normal_highp != planet_flatten_normal_in) {
+		float flatten_angle = length(planet_flatten_turn.xyz);
+		if (flatten_angle > 0.0) {
+			normal_highp = planet_flatten_direction(normal_highp, planet_flatten_turn.xyz / flatten_angle, flatten_angle, planet_flatten_turn.w);
+		}
+	}
+#endif
 
 	float roughness = roughness_highp;
 	float metallic = metallic_highp;

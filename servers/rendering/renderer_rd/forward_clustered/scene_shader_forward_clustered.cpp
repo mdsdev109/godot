@@ -799,6 +799,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 
 		//for light
 		actions.renames["VIEW"] = "view_highp";
+		actions.renames["PLANET_FLATTEN"] = "planet_flatten_turn";
 		actions.renames["SPECULAR_AMOUNT"] = "specular_amount_highp";
 		actions.renames["LIGHT_COLOR"] = "light_color_highp";
 		actions.renames["LIGHT_IS_DIRECTIONAL"] = "is_directional";

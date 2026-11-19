@@ -77,6 +77,30 @@ vec3 planet_flatten_point(vec3 p, vec3 centre, vec3 eye, float radius, float gro
 	return eye + t * o.x + F * o.y;
 }
 
+// The turn of directions at a point drawn at `drawn` -- what planet_flatten_point gives for the point drawn there, worked
+// out from where it is drawn: vec4(axis * angle, how much). A point keeps its bearing from the eye, so the drawn point
+// gives it; wholly flattened, where it sits round the ground sphere gives its distance round the planet exactly (the
+// inverse of the ground picture), and part way it is near enough for the turn of a normal. For a fragment, which has
+// only where it is drawn (a normal the material writes, the material's PLANET_FLATTEN).
+vec4 planet_flatten_turn_at(vec3 drawn, vec3 centre, vec3 eye, float radius, float ground_radius, float amount) {
+	if (amount <= 0.0) {
+		return vec4(0.0);
+	}
+	vec3 F = normalize(eye - centre);
+	vec3 d = drawn - eye;
+	vec3 t = d - F * dot(d, F);
+	float tl = length(t);
+	if (tl < 0.00001 * max(length(d), 1.0)) {
+		return vec4(0.0);
+	}
+	t /= tl;
+	// From the ground sphere's centre, ground_radius - radius below the planet's along the eye's up.
+	vec3 v = (drawn - centre) + F * (ground_radius - radius);
+	float th = atan(dot(v, t), dot(v, F));
+	float ang = th * ground_radius / radius;
+	return vec4(normalize(cross(F, t)) * (th - ang), amount);
+}
+
 // A direction at the point (a normal, a tangent) as it is drawn there: turned as planet_flatten_point says.
 vec3 planet_flatten_direction(vec3 v, vec3 axis, float angle, float mix_amount) {
 	if (mix_amount <= 0.0) {
