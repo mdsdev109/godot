@@ -265,6 +265,12 @@ void PlanetField3D::set_mountain_ridge(real_t p_v) {
 }
 real_t PlanetField3D::get_mountain_ridge() const { return data.mountain_ridge; }
 
+void PlanetField3D::set_plan_freedom(bool p_v) {
+	data.plan_freedom = p_v;
+	emit_changed();
+}
+bool PlanetField3D::get_plan_freedom() const { return data.plan_freedom; }
+
 void PlanetField3D::set_terrace_step(real_t p_v) {
 	ERR_FAIL_COND_MSG(p_v < 0, "PlanetField3D terrace_step cannot be negative.");
 	data.terrace_step = p_v;
@@ -604,6 +610,8 @@ void PlanetField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mountain_amplitude"), &PlanetField3D::get_mountain_amplitude);
 	ClassDB::bind_method(D_METHOD("set_mountain_ridge", "value"), &PlanetField3D::set_mountain_ridge);
 	ClassDB::bind_method(D_METHOD("get_mountain_ridge"), &PlanetField3D::get_mountain_ridge);
+	ClassDB::bind_method(D_METHOD("set_plan_freedom", "value"), &PlanetField3D::set_plan_freedom);
+	ClassDB::bind_method(D_METHOD("get_plan_freedom"), &PlanetField3D::get_plan_freedom);
 	ClassDB::bind_method(D_METHOD("set_terrace_step", "value"), &PlanetField3D::set_terrace_step);
 	ClassDB::bind_method(D_METHOD("get_terrace_step"), &PlanetField3D::get_terrace_step);
 	ClassDB::bind_method(D_METHOD("set_terrace_riser", "value"), &PlanetField3D::set_terrace_riser);
@@ -692,6 +700,7 @@ void PlanetField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "macro_height_scale", PROPERTY_HINT_RANGE, "0,100000,0.001,or_greater,suffix:m"), "set_macro_height_scale", "get_macro_height_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_amplitude", PROPERTY_HINT_RANGE, "0,8,0.001"), "set_mountain_amplitude", "get_mountain_amplitude");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mountain_ridge", PROPERTY_HINT_RANGE, "0,4,0.001"), "set_mountain_ridge", "get_mountain_ridge");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "plan_freedom"), "set_plan_freedom", "get_plan_freedom");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_step", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_terrace_step", "get_terrace_step");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "terrace_riser", PROPERTY_HINT_RANGE, "0.02,1,0.001"), "set_terrace_riser", "get_terrace_riser");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "plateau_height", PROPERTY_HINT_RANGE, "0,1000,0.1,or_greater,suffix:m"), "set_plateau_height", "get_plateau_height");

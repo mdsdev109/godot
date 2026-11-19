@@ -47,6 +47,8 @@ modules/jolt_physics/shapes/     JoltPlanetShape3D and JoltCustomPlanetShape
 modules/planet_net/              the client/server layer: PlanetNetServer, PlanetNetClient over ENet
 servers/rendering/renderer_rd/shaders/planet_flatten_inc.glsl   a small planet drawn flattened round the camera:
                                  Camera3D.planet_flatten_*, Forward+ only (planet-demo's docs/FLATTENED_GROUND.md)
+PlanetFieldData::plan_freedom      the macro map's fourth channel as how far the ground may leave the macro height
+                                 (planet-demo's docs/PLANET_PLAN.md); packed for the collider and in planet_field_equal
 ```
 
 The field must stay free of C runtime transcendentals -- use `planet_det_math.h` -- or Windows and

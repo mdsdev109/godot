@@ -141,6 +141,7 @@ void PlanetShape3D::_update_shape() {
 	data["macro_height_scale"] = fd.macro_height_scale;
 	data["mountain_amplitude"] = fd.mountain_amplitude;
 	data["mountain_ridge"] = fd.mountain_ridge;
+	data["plan_freedom"] = fd.plan_freedom;
 	data["terrace_step"] = fd.terrace_step;
 	data["terrace_riser"] = fd.terrace_riser;
 	data["plateau_height"] = fd.plateau_height;

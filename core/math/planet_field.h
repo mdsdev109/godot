@@ -309,6 +309,11 @@ struct PlanetFieldData {
 	// entries instead of twenty-seven.
 	double mountain_amplitude = 0.0;
 	double mountain_ridge = 0.0;
+	// The macro map's fourth channel as the plan's FREEDOM (planet-demo's docs/PLANET_PLAN.md): how far the ground may
+	// leave the macro height there. 0 holds it to the macro height exactly -- a planned road bed or a town's pad --
+	// and 1 is the terrain as it would be. It scales everything but the macro term: the noise, the biome's base
+	// elevation, terraces, plateaus and landforms. Off by default, when the channel is the climate's unused weirdness.
+	bool plan_freedom = false;
 
 	// Globally aligned vertical spacing between terrain shelves, in metres. Individual biomes blend
 	// their terrace strength, but not the spacing: changing the spacing across climate boundaries
@@ -365,6 +370,8 @@ struct PlanetFieldData {
 
 		const double h = double(macro.height);
 		double amp_scale = double(b.amplitude_scale) * (1.0 + mountain_amplitude * h);
+		const float freedom = plan_freedom ? macro.weirdness : 1.f;
+		amp_scale *= double(freedom);
 
 		PlanetHashNoise::ShapeMix mix = b.shape;
 		mix.ridged += float(mountain_ridge * h);
@@ -378,16 +385,16 @@ struct PlanetFieldData {
 
 		r_shape = mix;
 		r_amplitude = amplitude * amp_scale;
-		r_base_offset = amplitude * double(b.base_elevation) + macro_height_scale * (h - 0.5);
+		r_base_offset = amplitude * double(b.base_elevation * freedom) + macro_height_scale * (h - 0.5);
 		if (b.frequency_scale > 0.f) {
 			r_fbm.period = fbm.period / b.frequency_scale;
 		}
 		r_fbm.gain = b.roughness;
-		r_terrace_strength = b.terrace_strength;
-		r_plateau_strength = b.plateau_strength;
+		r_terrace_strength = b.terrace_strength * freedom;
+		r_plateau_strength = b.plateau_strength * freedom;
 		if (r_landform) {
-			r_landform[0] = b.landform_strength;
-			r_landform[1] = b.hill_strength;
+			r_landform[0] = b.landform_strength * freedom;
+			r_landform[1] = b.hill_strength * freedom;
 		}
 	}
 
@@ -802,7 +809,7 @@ inline bool planet_field_equal(const PlanetFieldData &a, const PlanetFieldData &
 			a.floor_radius != b.floor_radius || a.sea_level_radius != b.sea_level_radius ||
 			a.dig_margin != b.dig_margin ||
 			a.macro_height_scale != b.macro_height_scale || a.mountain_amplitude != b.mountain_amplitude ||
-			a.mountain_ridge != b.mountain_ridge || a.terrace_step != b.terrace_step ||
+			a.mountain_ridge != b.mountain_ridge || a.plan_freedom != b.plan_freedom || a.terrace_step != b.terrace_step ||
 			a.terrace_riser != b.terrace_riser || a.plateau_height != b.plateau_height ||
 			a.plateau_period != b.plateau_period || a.plateau_levels != b.plateau_levels ||
 			a.plateau_edge != b.plateau_edge || a.plateau_spread != b.plateau_spread ||

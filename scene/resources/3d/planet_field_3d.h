@@ -83,6 +83,8 @@ public:
 	real_t get_mountain_amplitude() const;
 	void set_mountain_ridge(real_t p_v);
 	real_t get_mountain_ridge() const;
+	void set_plan_freedom(bool p_v);
+	bool get_plan_freedom() const;
 	void set_terrace_step(real_t p_v);
 	real_t get_terrace_step() const;
 	void set_terrace_riser(real_t p_v);
