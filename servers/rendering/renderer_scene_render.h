@@ -310,13 +310,25 @@ public:
 		float radius = 0.0f;
 		float ground_radius = 0.0f;
 		float amount = 0.0f;
+		float relief = 1.0f; // heights drawn this many times as high
 		uint32_t layers = 0xFFFFFFFF;
 
-		bool is_active() const { return radius > 0.0f && ground_radius > 0.0f && amount > 0.0f; }
+		bool is_active() const { return radius > 0.0f && ((ground_radius > 0.0f && amount > 0.0f) || relief < 1.0f); }
 
 		// Where `p_point` is drawn seen from `p_eye` (world space): planet_flatten_inc.glsl's planet_flatten_point, in
 		// real_t, for culling by where things are drawn. Keep the three the same (and planet-demo's PlanetFlatten).
-		Vector3 draw(const Vector3 &p_point, const Vector3 &p_eye) const {
+		Vector3 draw(const Vector3 &p_point_true, const Vector3 &p_eye) const {
+			Vector3 p_point = p_point_true;
+			if (relief < 1.0f) {
+				Vector3 q = p_point - center;
+				real_t r = q.length();
+				if (r > 0.0) {
+					p_point += q * ((r - radius) * (relief - 1.0) / r);
+				}
+			}
+			if (ground_radius <= 0.0f || amount <= 0.0f) {
+				return p_point;
+			}
 			Vector3 e = p_eye - center;
 			real_t eye_r = e.length();
 			Vector3 q = p_point - center;

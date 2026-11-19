@@ -92,6 +92,7 @@ private:
 	real_t planet_flatten_radius = 0.0;
 	real_t planet_flatten_ground_radius = 0.0;
 	real_t planet_flatten_amount = 0.0;
+	real_t planet_flatten_relief = 1.0;
 	uint32_t planet_flatten_layers = 0xfffff;
 	void _update_planet_flatten();
 
@@ -208,6 +209,8 @@ public:
 	real_t get_planet_flatten_ground_radius() const;
 	void set_planet_flatten_amount(real_t p_amount);
 	real_t get_planet_flatten_amount() const;
+	void set_planet_flatten_relief(real_t p_relief);
+	real_t get_planet_flatten_relief() const;
 	void set_planet_flatten_layers(uint32_t p_layers);
 	uint32_t get_planet_flatten_layers() const;
 

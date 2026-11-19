@@ -190,7 +190,7 @@ private:
 		float planet_flatten_amount;
 		uint32_t planet_flatten_layers;
 		uint32_t planet_flatten_enabled;
-		uint32_t planet_flatten_pad;
+		float planet_flatten_relief;
 	};
 
 	struct UBODATA {

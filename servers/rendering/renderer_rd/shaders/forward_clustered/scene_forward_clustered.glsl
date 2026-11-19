@@ -495,6 +495,17 @@ void vertex_shader(vec3 vertex_input,
 		vec3 flatten_axis;
 		float flatten_angle;
 		float flatten_mix;
+		if (scene_data.planet_flatten_relief < 1.0) {
+			vec3 flatten_up = normalize(vertex - scene_data.planet_flatten_center);
+			vertex = planet_flatten_relief_point(vertex, scene_data.planet_flatten_center, scene_data.planet_flatten_radius, scene_data.planet_flatten_relief);
+#ifdef NORMAL_USED
+			normal = planet_flatten_relief_normal(normal, flatten_up, scene_data.planet_flatten_relief);
+#endif
+#ifdef TANGENT_USED
+			tangent = planet_flatten_relief_tangent(tangent, flatten_up, scene_data.planet_flatten_relief);
+			binormal = planet_flatten_relief_tangent(binormal, flatten_up, scene_data.planet_flatten_relief);
+#endif
+		}
 		vertex = planet_flatten_point(vertex, scene_data.planet_flatten_center, scene_data.planet_flatten_eye,
 				scene_data.planet_flatten_radius, scene_data.planet_flatten_ground_radius, scene_data.planet_flatten_amount,
 				flatten_axis, flatten_angle, flatten_mix);
@@ -1295,8 +1306,10 @@ void fragment_shader(in SceneData scene_data) {
 
 	// Planet flattening's turn here (planet_flatten_turn_at), view space: PLANET_FLATTEN to the material.
 	vec4 planet_flatten_turn = vec4(0.0);
+	bool planet_flatten_here = false; // flattened or lowered here at all
 #if !defined(PLANET_FLATTEN_DISABLED) && !defined(OVERRIDE_POSITION)
 	if (scene_data_block.data.planet_flatten_enabled != 0u && (instances.data[instance_index_interp].layer_mask & scene_data_block.data.planet_flatten_layers) != 0u) {
+		planet_flatten_here = true;
 		planet_flatten_turn = planet_flatten_turn_at(vertex_interp, scene_data_block.data.planet_flatten_center, scene_data_block.data.planet_flatten_eye,
 				scene_data_block.data.planet_flatten_radius, scene_data_block.data.planet_flatten_ground_radius, scene_data_block.data.planet_flatten_amount);
 	}
@@ -1389,6 +1402,11 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef NORMAL_USED
 	// A normal the material wrote is where the surface truly is (its own field, its own varyings): turned as the vertex
 	// was. One it left alone came turned from the vertex.
+	if (planet_flatten_here && scene_data_block.data.planet_flatten_relief < 1.0 && normal_highp != planet_flatten_normal_in) {
+		// Lowered first, as the vertex was: about its radial direction, taken from where it is drawn (exact while nothing
+		// is flattened, which is when relief is lowered).
+		normal_highp = planet_flatten_relief_normal(normal_highp, normalize(vertex_interp - scene_data_block.data.planet_flatten_center), scene_data_block.data.planet_flatten_relief);
+	}
 	if (planet_flatten_turn.w > 0.0 && normal_highp != planet_flatten_normal_in) {
 		float flatten_angle = length(planet_flatten_turn.xyz);
 		if (flatten_angle > 0.0) {

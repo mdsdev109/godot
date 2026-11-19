@@ -189,9 +189,10 @@
 			<param index="2" name="radius" type="float" />
 			<param index="3" name="ground_radius" type="float" />
 			<param index="4" name="amount" type="float" />
-			<param index="5" name="layers" type="int" />
+			<param index="5" name="relief" type="float" />
+			<param index="6" name="layers" type="int" />
 			<description>
-				Draws a planet of [param radius] centered at [param center] as if its ground were a sphere of [param ground_radius] touching it under the camera, so its horizon is further away. [param amount] goes from [code]0.0[/code] (the true sphere) to [code]1.0[/code] (the flattened ground). Only where vertices are drawn changes, in every pass including shadows; instances on none of [param layers] and materials with [code]render_mode planet_flatten_disabled[/code] are drawn as they are. Inactive while either radius or [param amount] is [code]0.0[/code]. Forward+ only. Culling still uses true positions.
+				Draws a planet of [param radius] centered at [param center] as if its ground were a sphere of [param ground_radius] touching it under the camera, so its horizon is further away. [param amount] goes from [code]0.0[/code] (the true sphere) to [code]1.0[/code] (the flattened ground). Heights above [param radius] are drawn [param relief] times as high first ([code]1.0[/code]: as they are). Only where vertices are drawn changes, in every pass including shadows; instances on none of [param layers] and materials with [code]render_mode planet_flatten_disabled[/code] are drawn as they are. Inactive while [param radius] is [code]0.0[/code], or while [param relief] is [code]1.0[/code] and [param ground_radius] or [param amount] is [code]0.0[/code]. Forward+ only. Culling still uses true positions.
 			</description>
 		</method>
 		<method name="camera_set_transform">

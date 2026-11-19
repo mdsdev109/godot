@@ -147,13 +147,14 @@ void RendererSceneCull::camera_set_compositor(RID p_camera, RID p_compositor) {
 	camera->compositor = p_compositor;
 }
 
-void RendererSceneCull::camera_set_planet_flatten(RID p_camera, const Vector3 &p_center, float p_radius, float p_ground_radius, float p_amount, uint32_t p_layers) {
+void RendererSceneCull::camera_set_planet_flatten(RID p_camera, const Vector3 &p_center, float p_radius, float p_ground_radius, float p_amount, float p_relief, uint32_t p_layers) {
 	Camera *camera = camera_owner.get_or_null(p_camera);
 	ERR_FAIL_NULL(camera);
 	camera->planet_flatten.center = p_center;
 	camera->planet_flatten.radius = p_radius;
 	camera->planet_flatten.ground_radius = p_ground_radius;
 	camera->planet_flatten.amount = CLAMP(p_amount, 0.0f, 1.0f);
+	camera->planet_flatten.relief = CLAMP(p_relief, 0.0f, 1.0f);
 	camera->planet_flatten.layers = p_layers;
 }
 

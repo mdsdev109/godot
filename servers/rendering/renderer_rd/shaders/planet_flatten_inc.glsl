@@ -26,6 +26,35 @@ vec3 planet_flatten_rotate(vec3 v, vec3 axis, float angle) {
 	return v * c + cross(axis, v) * sin(angle) + axis * dot(axis, v) * (1.0 - c);
 }
 
+// Relief: heights above `radius` drawn `relief` times as high (1: as they are), before any flattening -- what the game
+// lowers late in a climb, so from far up a small planet's mountains are not spikes on a ball. Directions follow: a
+// normal's part along the ground and a tangent's part up it scale by `relief` (exact for a height field's), with `up`
+// the radial direction at the point.
+vec3 planet_flatten_relief_point(vec3 p, vec3 centre, float radius, float relief) {
+	vec3 q = p - centre;
+	float r = length(q);
+	if (relief >= 1.0 || r <= 0.0) {
+		return p;
+	}
+	return p + q * ((r - radius) * (relief - 1.0) / r); // moved by the change in height, not rebuilt from the radius
+}
+
+vec3 planet_flatten_relief_normal(vec3 n, vec3 up, float relief) {
+	if (relief >= 1.0) {
+		return n;
+	}
+	float a = dot(n, up);
+	return normalize(up * a + (n - up * a) * relief);
+}
+
+vec3 planet_flatten_relief_tangent(vec3 v, vec3 up, float relief) {
+	if (relief >= 1.0) {
+		return v;
+	}
+	float a = dot(v, up);
+	return normalize(v - up * a * (1.0 - relief));
+}
+
 // Point `p`, the planet's centre and the eye in one frame; `radius` the true radius, `ground_radius` the one drawn on
 // the ground, `amount` 1 the ground picture, 0 the true one. Returns where `p` is drawn; `r_axis` and `r_angle` turn
 // its directions (planet_flatten_direction), `r_mix` how much of that turn they take. A point all but straight above or

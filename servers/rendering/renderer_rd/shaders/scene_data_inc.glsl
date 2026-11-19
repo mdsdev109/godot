@@ -90,5 +90,5 @@ struct SceneData {
 	float planet_flatten_amount;
 	uint planet_flatten_layers; // only instances on these layers are flattened
 	uint planet_flatten_enabled;
-	uint planet_flatten_pad;
+	float planet_flatten_relief; // heights drawn this many times as high (1: as they are)
 };

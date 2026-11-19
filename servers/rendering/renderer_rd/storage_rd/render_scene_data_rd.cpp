@@ -146,7 +146,8 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 		_store_planet_flatten(ubo.planet_flatten_center, ubo.planet_flatten_eye, flatten, cam_transform, main_cam_transform.origin);
 		ubo.planet_flatten_radius = flatten.radius;
 		ubo.planet_flatten_ground_radius = flatten.ground_radius;
-		ubo.planet_flatten_amount = MIN(flatten.amount, 1.0f);
+		ubo.planet_flatten_amount = flatten.ground_radius > 0.0f ? MIN(flatten.amount, 1.0f) : 0.0f;
+		ubo.planet_flatten_relief = MIN(flatten.relief, 1.0f);
 		ubo.planet_flatten_layers = flatten.layers;
 		ubo.planet_flatten_enabled = 1;
 	}
