@@ -81,4 +81,14 @@ struct SceneData {
 	float IBL_exposure_normalization;
 	uint camera_visible_layers;
 	float pass_alpha_multiplier;
+
+	// Planet flattening (planet_flatten_inc.glsl): the planet's centre and the main camera in this pass's view space.
+	vec3 planet_flatten_center;
+	float planet_flatten_radius;
+	vec3 planet_flatten_eye;
+	float planet_flatten_ground_radius;
+	float planet_flatten_amount;
+	uint planet_flatten_layers; // only instances on these layers are flattened
+	uint planet_flatten_enabled;
+	uint planet_flatten_pad;
 };

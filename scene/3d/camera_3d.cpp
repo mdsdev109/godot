@@ -600,6 +600,55 @@ Ref<Compositor> Camera3D::get_compositor() const {
 	return compositor;
 }
 
+void Camera3D::_update_planet_flatten() {
+	RS::get_singleton()->camera_set_planet_flatten(camera, planet_flatten_center, planet_flatten_radius, planet_flatten_ground_radius, planet_flatten_amount, planet_flatten_layers);
+}
+
+void Camera3D::set_planet_flatten_center(const Vector3 &p_center) {
+	planet_flatten_center = p_center;
+	_update_planet_flatten();
+}
+
+Vector3 Camera3D::get_planet_flatten_center() const {
+	return planet_flatten_center;
+}
+
+void Camera3D::set_planet_flatten_radius(real_t p_radius) {
+	planet_flatten_radius = MAX(p_radius, 0.0);
+	_update_planet_flatten();
+}
+
+real_t Camera3D::get_planet_flatten_radius() const {
+	return planet_flatten_radius;
+}
+
+void Camera3D::set_planet_flatten_ground_radius(real_t p_radius) {
+	planet_flatten_ground_radius = MAX(p_radius, 0.0);
+	_update_planet_flatten();
+}
+
+real_t Camera3D::get_planet_flatten_ground_radius() const {
+	return planet_flatten_ground_radius;
+}
+
+void Camera3D::set_planet_flatten_amount(real_t p_amount) {
+	planet_flatten_amount = CLAMP(p_amount, 0.0, 1.0);
+	_update_planet_flatten();
+}
+
+real_t Camera3D::get_planet_flatten_amount() const {
+	return planet_flatten_amount;
+}
+
+void Camera3D::set_planet_flatten_layers(uint32_t p_layers) {
+	planet_flatten_layers = p_layers;
+	_update_planet_flatten();
+}
+
+uint32_t Camera3D::get_planet_flatten_layers() const {
+	return planet_flatten_layers;
+}
+
 void Camera3D::set_keep_aspect_mode(KeepAspect p_aspect) {
 	keep_aspect = p_aspect;
 	RenderingServer::get_singleton()->camera_set_use_vertical_aspect(camera, p_aspect == KEEP_WIDTH);
@@ -670,6 +719,16 @@ void Camera3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_attributes"), &Camera3D::get_attributes);
 	ClassDB::bind_method(D_METHOD("set_compositor", "compositor"), &Camera3D::set_compositor);
 	ClassDB::bind_method(D_METHOD("get_compositor"), &Camera3D::get_compositor);
+	ClassDB::bind_method(D_METHOD("set_planet_flatten_center", "center"), &Camera3D::set_planet_flatten_center);
+	ClassDB::bind_method(D_METHOD("get_planet_flatten_center"), &Camera3D::get_planet_flatten_center);
+	ClassDB::bind_method(D_METHOD("set_planet_flatten_radius", "radius"), &Camera3D::set_planet_flatten_radius);
+	ClassDB::bind_method(D_METHOD("get_planet_flatten_radius"), &Camera3D::get_planet_flatten_radius);
+	ClassDB::bind_method(D_METHOD("set_planet_flatten_ground_radius", "radius"), &Camera3D::set_planet_flatten_ground_radius);
+	ClassDB::bind_method(D_METHOD("get_planet_flatten_ground_radius"), &Camera3D::get_planet_flatten_ground_radius);
+	ClassDB::bind_method(D_METHOD("set_planet_flatten_amount", "amount"), &Camera3D::set_planet_flatten_amount);
+	ClassDB::bind_method(D_METHOD("get_planet_flatten_amount"), &Camera3D::get_planet_flatten_amount);
+	ClassDB::bind_method(D_METHOD("set_planet_flatten_layers", "layers"), &Camera3D::set_planet_flatten_layers);
+	ClassDB::bind_method(D_METHOD("get_planet_flatten_layers"), &Camera3D::get_planet_flatten_layers);
 	ClassDB::bind_method(D_METHOD("set_keep_aspect_mode", "mode"), &Camera3D::set_keep_aspect_mode);
 	ClassDB::bind_method(D_METHOD("get_keep_aspect_mode"), &Camera3D::get_keep_aspect_mode);
 	ClassDB::bind_method(D_METHOD("set_doppler_tracking", "mode"), &Camera3D::set_doppler_tracking);
@@ -701,6 +760,13 @@ void Camera3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "frustum_offset", PROPERTY_HINT_NONE, "suffix:m"), "set_frustum_offset", "get_frustum_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "near", PROPERTY_HINT_RANGE, "0.001,10,0.001,or_greater,exp,suffix:m"), "set_near", "get_near");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "far", PROPERTY_HINT_RANGE, "0.01,4000,0.01,or_greater,exp,suffix:m"), "set_far", "get_far");
+
+	ADD_GROUP("Planet Flatten", "planet_flatten_");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "planet_flatten_center", PROPERTY_HINT_NONE, "suffix:m"), "set_planet_flatten_center", "get_planet_flatten_center");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_flatten_radius", PROPERTY_HINT_RANGE, "0,10000,1,or_greater,suffix:m"), "set_planet_flatten_radius", "get_planet_flatten_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_flatten_ground_radius", PROPERTY_HINT_RANGE, "0,1000000,1,or_greater,suffix:m"), "set_planet_flatten_ground_radius", "get_planet_flatten_ground_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "planet_flatten_amount", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_planet_flatten_amount", "get_planet_flatten_amount");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "planet_flatten_layers", PROPERTY_HINT_LAYERS_3D_RENDER), "set_planet_flatten_layers", "get_planet_flatten_layers");
 
 	BIND_ENUM_CONSTANT(PROJECTION_PERSPECTIVE);
 	BIND_ENUM_CONSTANT(PROJECTION_ORTHOGONAL);

@@ -147,6 +147,16 @@ void RendererSceneCull::camera_set_compositor(RID p_camera, RID p_compositor) {
 	camera->compositor = p_compositor;
 }
 
+void RendererSceneCull::camera_set_planet_flatten(RID p_camera, const Vector3 &p_center, float p_radius, float p_ground_radius, float p_amount, uint32_t p_layers) {
+	Camera *camera = camera_owner.get_or_null(p_camera);
+	ERR_FAIL_NULL(camera);
+	camera->planet_flatten.center = p_center;
+	camera->planet_flatten.radius = p_radius;
+	camera->planet_flatten.ground_radius = p_ground_radius;
+	camera->planet_flatten.amount = CLAMP(p_amount, 0.0f, 1.0f);
+	camera->planet_flatten.layers = p_layers;
+}
+
 void RendererSceneCull::camera_set_use_vertical_aspect(RID p_camera, bool p_enable) {
 	Camera *camera = camera_owner.get_or_null(p_camera);
 	ERR_FAIL_NULL(camera);
@@ -2782,6 +2792,8 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 
 	RENDER_TIMESTAMP("Update Occlusion Buffer")
 	// For now just cull on the first camera
+	camera_data.planet_flatten = camera->planet_flatten;
+
 	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_projection, camera_data.is_orthogonal);
 
 	_render_scene(&camera_data, p_render_buffers, environment, camera->attributes, compositor, camera->visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, p_window_output_max_value, true, r_render_info);
@@ -2893,6 +2905,26 @@ void RendererSceneCull::_scene_cull_threaded(uint32_t p_thread, CullData *cull_d
 	_scene_cull(*cull_data, scene_cull_result_threads[p_thread], cull_from, cull_to);
 }
 
+// An instance outside frustum `p_frustum` where it is, tested where it is drawn: a small planet drawn flattened round the
+// camera (RendererSceneRender::PlanetFlatten) shows what is truly below the frustum, behind the planet's curve, in it.
+// Its bounds' corners and centre carried to where they are drawn, and a tenth of their size round those. Bounds a good
+// part of the planet across are left as they are: those reach the frustum where they are, or their corners say nothing.
+bool RendererSceneCull::_flattened_in_frustum(const CullData &p_cull_data, const InstanceBounds &p_bounds, const Frustum &p_frustum) {
+	const RendererSceneRender::PlanetFlatten &flatten = p_cull_data.planet_flatten;
+	AABB box(Vector3(p_bounds.bounds[0], p_bounds.bounds[1], p_bounds.bounds[2]),
+			Vector3(p_bounds.bounds[3] - p_bounds.bounds[0], p_bounds.bounds[4] - p_bounds.bounds[1], p_bounds.bounds[5] - p_bounds.bounds[2]));
+	if (box.get_longest_axis_size() > flatten.radius * 0.5) {
+		return false;
+	}
+	Vector3 eye = p_cull_data.cam_transform.origin;
+	AABB drawn(flatten.draw(box.get_center(), eye), Vector3());
+	for (int k = 0; k < 8; k++) {
+		drawn.expand_to(flatten.draw(box.get_endpoint(k), eye));
+	}
+	drawn = drawn.grow(drawn.get_longest_axis_size() * 0.1);
+	return InstanceBounds(drawn).in_frustum(p_frustum);
+}
+
 void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cull_result, uint64_t p_from, uint64_t p_to) {
 	uint64_t frame_number = RSG::rasterizer->get_frame_number();
 	float lightmap_probe_update_speed = RSG::light_storage->lightmap_get_probe_capture_update_speed() * RSG::rasterizer->get_frame_delta_time();
@@ -2912,6 +2944,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 	uint32_t max_lights_total = scene_render->get_max_lights_total();
 
 	Transform3D inv_cam_transform = cull_data.cam_transform.inverse();
+	bool flatten_active = cull_data.planet_flatten.is_active();
 	float z_near = cull_data.camera_matrix->get_z_near();
 	bool is_orthogonal = cull_data.camera_matrix->is_orthogonal();
 
@@ -2924,7 +2957,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 #define HIDDEN_BY_VISIBILITY_CHECKS (visibility_flags == InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN_CLOSE_RANGE || visibility_flags == InstanceData::FLAG_VISIBILITY_DEPENDENCY_HIDDEN)
 #define LAYER_CHECK (cull_data.visible_layers & idata.layer_mask)
-#define IN_FRUSTUM(f) (cull_data.scenario->instance_aabbs[i].in_frustum(f))
+#define IN_FRUSTUM(f) (cull_data.scenario->instance_aabbs[i].in_frustum(f) || (flatten_active && (idata.layer_mask & cull_data.planet_flatten.layers) && _flattened_in_frustum(cull_data, cull_data.scenario->instance_aabbs[i], f)))
 #define VIS_RANGE_CHECK ((idata.visibility_index == -1) || _visibility_range_check<false>(cull_data.scenario->instance_visibility[idata.visibility_index], cull_data.cam_transform.origin, cull_data.visibility_viewport_mask) == 0)
 #define VIS_PARENT_CHECK (_visibility_parent_check(cull_data, idata))
 #define VIS_CHECK (visibility_check < 0 ? (visibility_check = (visibility_flags != InstanceData::FLAG_VISIBILITY_DEPENDENCY_NEEDS_CHECK || (VIS_RANGE_CHECK && VIS_PARENT_CHECK))) : visibility_check)
@@ -3436,6 +3469,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.planet_flatten = p_reflection_probe.is_valid() ? RendererSceneRender::PlanetFlatten() : p_camera_data->planet_flatten;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif

@@ -87,6 +87,7 @@ public:
 		RID env;
 		RID attributes;
 		RID compositor;
+		RendererSceneRender::PlanetFlatten planet_flatten;
 
 		Transform3D transform;
 
@@ -115,6 +116,7 @@ public:
 	virtual void camera_set_environment(RID p_camera, RID p_env);
 	virtual void camera_set_camera_attributes(RID p_camera, RID p_attributes);
 	virtual void camera_set_compositor(RID p_camera, RID p_compositor);
+	virtual void camera_set_planet_flatten(RID p_camera, const Vector3 &p_center, float p_radius, float p_ground_radius, float p_amount, uint32_t p_layers);
 	virtual void camera_set_use_vertical_aspect(RID p_camera, bool p_enable);
 	virtual bool is_camera(RID p_camera) const;
 
@@ -1144,10 +1146,12 @@ public:
 		const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer;
 		const Projection *camera_matrix;
 		uint64_t visibility_viewport_mask;
+		RendererSceneRender::PlanetFlatten planet_flatten; // culled where things are drawn too, when active
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);
 	void _scene_cull(CullData &cull_data, InstanceCullResult &cull_result, uint64_t p_from, uint64_t p_to);
+	static bool _flattened_in_frustum(const CullData &p_cull_data, const InstanceBounds &p_bounds, const Frustum &p_frustum);
 	static void _scene_particles_set_view_axis(RID p_particles, const Vector3 &p_axis, const Vector3 &p_up_axis);
 	_FORCE_INLINE_ bool _visibility_parent_check(const CullData &p_cull_data, const InstanceData &p_instance_data);
 

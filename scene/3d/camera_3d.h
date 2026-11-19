@@ -87,6 +87,14 @@ private:
 	Ref<Compositor> compositor;
 	void _attributes_changed();
 
+	// Planet flattening (RenderingServer::camera_set_planet_flatten): inactive while either radius or the amount is 0.
+	Vector3 planet_flatten_center;
+	real_t planet_flatten_radius = 0.0;
+	real_t planet_flatten_ground_radius = 0.0;
+	real_t planet_flatten_amount = 0.0;
+	uint32_t planet_flatten_layers = 0xfffff;
+	void _update_planet_flatten();
+
 	// void _camera_make_current(Node *p_camera);
 	friend class Viewport;
 	void _update_audio_listener_state();
@@ -191,6 +199,17 @@ public:
 
 	void set_compositor(const Ref<Compositor> &p_compositor);
 	Ref<Compositor> get_compositor() const;
+
+	void set_planet_flatten_center(const Vector3 &p_center);
+	Vector3 get_planet_flatten_center() const;
+	void set_planet_flatten_radius(real_t p_radius);
+	real_t get_planet_flatten_radius() const;
+	void set_planet_flatten_ground_radius(real_t p_radius);
+	real_t get_planet_flatten_ground_radius() const;
+	void set_planet_flatten_amount(real_t p_amount);
+	real_t get_planet_flatten_amount() const;
+	void set_planet_flatten_layers(uint32_t p_layers);
+	uint32_t get_planet_flatten_layers() const;
 
 	void set_keep_aspect_mode(KeepAspect p_aspect);
 	KeepAspect get_keep_aspect_mode() const;

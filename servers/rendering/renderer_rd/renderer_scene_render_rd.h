@@ -130,6 +130,8 @@ private:
 	RSE::ViewportDebugDraw debug_draw = RSE::VIEWPORT_DEBUG_DRAW_DISABLED;
 	static RendererSceneRenderRD *singleton;
 
+	PlanetFlatten planet_flatten; // the camera being rendered's, set for its render_scene only
+
 	/* Shadow atlas */
 	RSE::ShadowQuality shadows_quality = RSE::SHADOW_QUALITY_MAX; //So it always updates when first set
 	RSE::ShadowQuality directional_shadow_quality = RSE::SHADOW_QUALITY_MAX;
@@ -286,6 +288,11 @@ public:
 	}
 	_FORCE_INLINE_ float directional_shadow_quality_radius_get() const {
 		return directional_shadow_quality_radius;
+	}
+
+	// The planet flattening of the camera being rendered (inactive outside a camera's render_scene).
+	_FORCE_INLINE_ const PlanetFlatten &planet_flatten_get() const {
+		return planet_flatten;
 	}
 
 	_FORCE_INLINE_ float *directional_penumbra_shadow_kernel_get() {

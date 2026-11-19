@@ -1505,8 +1505,14 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		clear_color = RSG::texture_storage->get_default_clear_color();
 	}
 
+	// The camera's planet flattening, for every pass of this render, shadows too (RenderSceneDataRD::update_ubo); none
+	// for a reflection probe, and none left for what renders outside a camera's render.
+	planet_flatten = p_reflection_probe.is_null() ? p_camera_data->planet_flatten : PlanetFlatten();
+
 	//calls _pre_opaque_render between depth pre-pass and opaque pass
 	_render_scene(&render_data, clear_color);
+
+	planet_flatten = PlanetFlatten();
 }
 
 void RendererSceneRenderRD::render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region) {

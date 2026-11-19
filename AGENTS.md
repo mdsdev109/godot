@@ -45,6 +45,8 @@ core/math/planet_det_math.h      sin/atan2/pow/... that give the same bits on ev
 servers/physics_3d/              SHAPE_PLANET, plumbed through the server, dummy and wrap_mt
 modules/jolt_physics/shapes/     JoltPlanetShape3D and JoltCustomPlanetShape
 modules/planet_net/              the client/server layer: PlanetNetServer, PlanetNetClient over ENet
+servers/rendering/renderer_rd/shaders/planet_flatten_inc.glsl   a small planet drawn flattened round the camera:
+                                 Camera3D.planet_flatten_*, Forward+ only (planet-demo's docs/FLATTENED_GROUND.md)
 ```
 
 The field must stay free of C runtime transcendentals -- use `planet_det_math.h` -- or Windows and

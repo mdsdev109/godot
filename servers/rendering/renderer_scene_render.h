@@ -302,6 +302,57 @@ public:
 		uint32_t positional_light_count;
 	};
 
+	// A small planet drawn flattened round the camera (renderer_rd/shaders/planet_flatten_inc.glsl): where its centre
+	// is, its radius, the radius of the sphere its ground is drawn on, how much (0 the true sphere, 1 the ground
+	// picture), and which render layers it applies to. Inactive unless both radii and the amount are positive.
+	struct PlanetFlatten {
+		Vector3 center;
+		float radius = 0.0f;
+		float ground_radius = 0.0f;
+		float amount = 0.0f;
+		uint32_t layers = 0xFFFFFFFF;
+
+		bool is_active() const { return radius > 0.0f && ground_radius > 0.0f && amount > 0.0f; }
+
+		// Where `p_point` is drawn seen from `p_eye` (world space): planet_flatten_inc.glsl's planet_flatten_point, in
+		// real_t, for culling by where things are drawn. Keep the three the same (and planet-demo's PlanetFlatten).
+		Vector3 draw(const Vector3 &p_point, const Vector3 &p_eye) const {
+			Vector3 e = p_eye - center;
+			real_t eye_r = e.length();
+			Vector3 q = p_point - center;
+			real_t r = q.length();
+			if (eye_r <= 0.0 || r <= 0.0) {
+				return p_point;
+			}
+			Vector3 f = e / eye_r;
+			Vector3 u = q / r;
+			Vector3 t = u - f * u.dot(f);
+			if (t.length() < 0.00001) {
+				return p_point;
+			}
+			t = t.normalized();
+			t = (t - f * t.dot(f)).normalized();
+			real_t ang = 2.0 * Math::asin(MIN((u - f).length() * 0.5, (real_t)1.0));
+			real_t s = radius * ang;
+			real_t h = r - radius;
+			real_t th = s / ground_radius;
+			real_t hs = Math::sin(0.5 * th);
+			Vector3 ground = f * ((radius - eye_r) + h * (1.0 - 2.0 * hs * hs) - 2.0 * ground_radius * hs * hs) + t * ((ground_radius + h) * Math::sin(th));
+			Vector3 truth = p_point - p_eye;
+			Vector2 g2(ground.dot(t), ground.dot(f));
+			Vector2 t2(truth.dot(t), truth.dot(f));
+			real_t between = Math::atan2(g2.x * t2.y - g2.y * t2.x, g2.dot(t2));
+			bool clamped = between > 0.000001;
+			if (amount >= 1.0f && !clamped) {
+				return p_eye + ground;
+			}
+			real_t turn = clamped ? between : (1.0 - amount) * between;
+			real_t stretch = Math::exp((1.0 - amount) * Math::log(MAX(t2.length(), (real_t)0.001) / MAX(g2.length(), (real_t)0.001)));
+			Vector2 o = Vector2(g2.x * Math::cos(turn) - g2.y * Math::sin(turn), g2.x * Math::sin(turn) + g2.y * Math::cos(turn)) * stretch;
+			return p_eye + t * o.x + f * o.y;
+		}
+	};
+
 	struct CameraData {
 		// flags
 		uint32_t view_count;
@@ -317,6 +368,8 @@ public:
 		Projection view_projection[RendererSceneRender::MAX_RENDER_VIEWS];
 		Vector2 taa_jitter;
 		float taa_frame_count = 0.0f;
+
+		PlanetFlatten planet_flatten;
 
 		void set_camera(const Transform3D p_transform, const Projection p_projection, bool p_is_orthogonal, bool p_vaspect, const Vector2 &p_taa_jitter = Vector2(), float p_taa_frame_count = 0.0f, uint32_t p_visible_layers = 0xFFFFFFFF);
 		void set_multiview_camera(uint32_t p_view_count, const Transform3D *p_transforms, const Projection *p_projections, bool p_is_orthogonal, bool p_vaspect, uint32_t p_visible_layers = 0xFFFFFFFF);

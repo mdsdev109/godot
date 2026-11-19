@@ -204,6 +204,21 @@
 		<member name="near" type="float" setter="set_near" getter="get_near" default="0.05">
 			The distance to the near culling boundary for this camera relative to its local Z axis. Lower values allow the camera to see objects more up close to its origin, at the cost of lower precision across the [i]entire[/i] range. Values lower than the default can lead to increased Z-fighting.
 		</member>
+		<member name="planet_flatten_amount" type="float" setter="set_planet_flatten_amount" getter="get_planet_flatten_amount" default="0.0">
+			How much the planet is drawn flattened, from [code]0.0[/code] (the true sphere) to [code]1.0[/code] (its ground drawn on a sphere of [member planet_flatten_ground_radius]). See [method RenderingServer.camera_set_planet_flatten].
+		</member>
+		<member name="planet_flatten_center" type="Vector3" setter="set_planet_flatten_center" getter="get_planet_flatten_center" default="Vector3(0, 0, 0)">
+			The center of the planet drawn flattened, in global coordinates.
+		</member>
+		<member name="planet_flatten_ground_radius" type="float" setter="set_planet_flatten_ground_radius" getter="get_planet_flatten_ground_radius" default="0.0">
+			The radius of the sphere the planet's ground is drawn on, touching it under the camera. [code]0.0[/code] disables flattening.
+		</member>
+		<member name="planet_flatten_layers" type="int" setter="set_planet_flatten_layers" getter="get_planet_flatten_layers" default="1048575">
+			The render layers flattened: an instance on none of them is drawn where it is.
+		</member>
+		<member name="planet_flatten_radius" type="float" setter="set_planet_flatten_radius" getter="get_planet_flatten_radius" default="0.0">
+			The true radius of the planet drawn flattened. [code]0.0[/code] disables flattening.
+		</member>
 		<member name="projection" type="int" setter="set_projection" getter="get_projection" enum="Camera3D.ProjectionType" default="0">
 			The camera's projection mode. In [constant PROJECTION_PERSPECTIVE] mode, objects' Z distance from the camera's local space scales their perceived size.
 		</member>

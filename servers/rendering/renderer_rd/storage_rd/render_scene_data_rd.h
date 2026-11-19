@@ -181,6 +181,16 @@ private:
 		float IBL_exposure_normalization; // Adjusts for baked exposure.
 		uint32_t camera_visible_layers;
 		float pass_alpha_multiplier;
+
+		// Planet flattening, in this pass's view space (scene_data_inc.glsl).
+		float planet_flatten_center[3];
+		float planet_flatten_radius;
+		float planet_flatten_eye[3];
+		float planet_flatten_ground_radius;
+		float planet_flatten_amount;
+		uint32_t planet_flatten_layers;
+		uint32_t planet_flatten_enabled;
+		uint32_t planet_flatten_pad;
 	};
 
 	struct UBODATA {

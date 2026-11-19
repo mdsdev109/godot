@@ -247,6 +247,7 @@ ShaderTypes::ShaderTypes() {
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("specular"), "schlick_ggx", "toon", "disabled" });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("skip_vertex_transform") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("world_vertex_coords") });
+		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("planet_flatten_disabled") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("ensure_correct_normals") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("shadows_disabled") });
 		shader_modes[RSE::SHADER_SPATIAL].modes.push_back({ PNAME("ambient_light_disabled") });

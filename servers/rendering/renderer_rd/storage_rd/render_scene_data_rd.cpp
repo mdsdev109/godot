@@ -71,6 +71,18 @@ RID RenderSceneDataRD::create_uniform_buffer() {
 	return RD::get_singleton()->uniform_buffer_create(sizeof(UBODATA));
 }
 
+// Planet flattening into `r_ubo` for a pass whose camera is `p_pass`, the eye being `p_eye` (both world space): the
+// planet's centre and the eye in that pass's view space, worked out here in double.
+static void _store_planet_flatten(float *r_center, float *r_eye, const RendererSceneRender::PlanetFlatten &p_flatten, const Transform3D &p_pass, const Vector3 &p_eye) {
+	Transform3D view = p_pass.affine_inverse();
+	Vector3 center = view.xform(p_flatten.center);
+	Vector3 eye = view.xform(p_eye);
+	for (int i = 0; i < 3; i++) {
+		r_center[i] = center[i];
+		r_eye[i] = eye[i];
+	}
+}
+
 void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw p_debug_mode, RID p_env, RID p_reflection_probe_instance, RID p_camera_attributes, bool p_pancake_shadows, const Size2i &p_screen_size, const Size2 &p_viewport_size, const Color &p_default_bg_color, float p_luminance_multiplier, bool p_opaque_render_buffers, bool p_apply_alpha_multiplier) {
 	RendererSceneRenderRD *render_scene_render = RendererSceneRenderRD::get_singleton();
 
@@ -128,6 +140,16 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 	RendererRD::MaterialStorage::store_soft_shadow_kernel(render_scene_render->soft_shadow_kernel_get(), ubo.soft_shadow_kernel);
 	ubo.camera_visible_layers = camera_visible_layers;
 	ubo.pass_alpha_multiplier = p_opaque_render_buffers && p_apply_alpha_multiplier ? 0.0f : 1.0f;
+
+	const RendererSceneRender::PlanetFlatten &flatten = render_scene_render->planet_flatten_get();
+	if (flatten.is_active()) {
+		_store_planet_flatten(ubo.planet_flatten_center, ubo.planet_flatten_eye, flatten, cam_transform, main_cam_transform.origin);
+		ubo.planet_flatten_radius = flatten.radius;
+		ubo.planet_flatten_ground_radius = flatten.ground_radius;
+		ubo.planet_flatten_amount = MIN(flatten.amount, 1.0f);
+		ubo.planet_flatten_layers = flatten.layers;
+		ubo.planet_flatten_enabled = 1;
+	}
 
 	ubo.viewport_size[0] = p_viewport_size.x;
 	ubo.viewport_size[1] = p_viewport_size.y;
@@ -291,6 +313,10 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 		prev_ubo.taa_jitter[0] = prev_taa_jitter.x;
 		prev_ubo.taa_jitter[1] = prev_taa_jitter.y;
 		prev_ubo.time -= time_step;
+		if (flatten.is_active()) {
+			// The previous frame drawn about its own eye (this frame's flattening: it is not kept).
+			_store_planet_flatten(prev_ubo.planet_flatten_center, prev_ubo.planet_flatten_eye, flatten, prev_cam_transform, prev_cam_transform.origin);
+		}
 	}
 
 	uniform_buffer = p_uniform_buffer;

@@ -534,6 +534,7 @@ public:
 	virtual void camera_set_environment(RID p_camera, RID p_env) = 0;
 	virtual void camera_set_camera_attributes(RID p_camera, RID p_camera_attributes) = 0;
 	virtual void camera_set_compositor(RID p_camera, RID p_compositor) = 0;
+	virtual void camera_set_planet_flatten(RID p_camera, const Vector3 &p_center, float p_radius, float p_ground_radius, float p_amount, uint32_t p_layers) = 0;
 	virtual void camera_set_use_vertical_aspect(RID p_camera, bool p_enable) = 0;
 
 	/* VIEWPORT API */

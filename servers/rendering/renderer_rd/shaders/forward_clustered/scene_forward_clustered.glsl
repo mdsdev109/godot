@@ -9,6 +9,8 @@
 
 #include "scene_forward_clustered_inc.glsl"
 
+#include "../planet_flatten_inc.glsl"
+
 #define SHADER_IS_SRGB false
 #define SHADER_SPACE_FAR 0.0
 
@@ -483,6 +485,27 @@ void vertex_shader(vec3 vertex_input,
 	binormal = (read_view_matrix * vec4(binormal, 0.0)).xyz;
 	tangent = (read_view_matrix * vec4(tangent, 0.0)).xyz;
 #endif
+#endif
+
+	// Planet flattening (planet_flatten_inc.glsl): where the vertex is drawn, in this pass's view space, after everything
+	// else has placed it -- for every material and pass, shadows too, unless the material opts out
+	// (render_mode planet_flatten_disabled) or the instance is on no layer the camera flattens.
+#if !defined(PLANET_FLATTEN_DISABLED) && !defined(OVERRIDE_POSITION)
+	if (scene_data.planet_flatten_enabled != 0u && (instances.data[instance_index].layer_mask & scene_data.planet_flatten_layers) != 0u) {
+		vec3 flatten_axis;
+		float flatten_angle;
+		float flatten_mix;
+		vertex = planet_flatten_point(vertex, scene_data.planet_flatten_center, scene_data.planet_flatten_eye,
+				scene_data.planet_flatten_radius, scene_data.planet_flatten_ground_radius, scene_data.planet_flatten_amount,
+				flatten_axis, flatten_angle, flatten_mix);
+#ifdef NORMAL_USED
+		normal = planet_flatten_direction(normal, flatten_axis, flatten_angle, flatten_mix);
+#endif
+#ifdef TANGENT_USED
+		tangent = planet_flatten_direction(tangent, flatten_axis, flatten_angle, flatten_mix);
+		binormal = planet_flatten_direction(binormal, flatten_axis, flatten_angle, flatten_mix);
+#endif
+	}
 #endif
 
 	vertex_interp = vertex;
