@@ -148,7 +148,15 @@ struct PlanetFieldData {
 		const PlanetMacroSample macro = macro_map->sample(p_unit_dir);
 		const Vector3 c = sample_coast(p_unit_dir);
 		const double macro_term = macro_height_scale * (double(macro.height) - 0.5);
-		return sea_level_radius - base_radius + double(PlanetCoastParams::add_relief(float(c.z), float(p_offset - macro_term)));
+		float profile = float(c.z);
+		if (plan_freedom && macro.weirdness < 1.f) {
+			// The coast's shaping -- its outline noise, beaches and cliffs -- is the terrain's like the rest: held to the
+			// plan's height where the plan holds the ground (resolve_params), so a road by the sea is where it was planned.
+			const float sea_height = float(0.5 + (sea_level_radius - base_radius) / macro_height_scale);
+			const float above = macro_map->sample(p_unit_dir, sea_height).height * float(macro_height_scale);
+			profile = above + (profile - above) * macro.weirdness;
+		}
+		return sea_level_radius - base_radius + double(PlanetCoastParams::add_relief(profile, float(p_offset - macro_term)));
 	}
 
 	double coast_displacement_bound() const {
